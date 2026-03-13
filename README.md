@@ -11,7 +11,7 @@
 
 ### 2. Создать и активировать виртуальное окружение (Windows)
 
-В корне проекта (там, где лежит `main.py` и `requirements.txt`):
+В корне проекта (там, где лежат `run.py`, `main.py` и `requirements.txt`):
 
 ```
 python -m venv venv
@@ -33,13 +33,20 @@ pip install -r requirements.txt
 
 Из корня проекта:
 ```
+python run.py
+```
+
+Совместимость со старым запуском сохранена:
+
+```
 python main.py
 ```
+
 По умолчанию Flask поднимет сервер на:
 
-- `http://127.0.0.1:5000/`  
+- `http://127.0.0.1:5001/`  
   или  
-- `http://localhost:5000/`
+- `http://localhost:5001/`
 
 Открой этот адрес в браузере.
 
