@@ -177,44 +177,38 @@ class LLMAgent:
 
         return tool_results, desc_ans, ans_id
 
-    def get_answer(self, a, b, w_type, time, budget, extra_notes, model_name=DEFAULT_MODEL):
+    def get_answer(self, a, b, w_type, time, budget, extra_notes, model_name=DEFAULT_MODEL, lang="ru"):
         dist = a.dist_between_points(b)
-        type_route = ""
-        if w_type == "friendly":
-            type_route = "Дружеская прогулка"
-        elif w_type == "romantic":
-            type_route = "Романтическая прогулка"
-        elif w_type == "family":
-            type_route = "Прогулка с семьёй"
-        elif w_type == "active":
-            type_route = "Активная прогулка"
-        elif w_type == "cozy":
-            type_route = "Спокойная и уютная прогулка"
-        elif w_type == "cultural":
-            type_route = "Культурная прогулка"
-        extra_notes_text = f"Дополнительные пожелания пользователя: {extra_notes}." if extra_notes.strip() else ""
+        route_types = {
+            "friendly": "friendly walk",
+            "romantic": "romantic walk",
+            "family": "family walk",
+            "active": "active walk",
+            "cozy": "cozy walk",
+            "cultural": "cultural walk",
+        }
+        output_language = "Russian" if lang == "ru" else "English"
+        extra_notes_text = (
+            f"Additional user preferences: {extra_notes}."
+            if extra_notes.strip()
+            else ""
+        )
 
-        system_prompt = f"Ты находишься в России, на Федеральной территории Сириус. \
-Требуется построить пешеходный маршрут для цели: \"{type_route}\", который начинается в адресе \
-{a.street} и заканчивается в адресе {b.street}. Длительность маршрута должна \
-быть равна примерно {time} минут. Расстояние от точки {a.street} до точки {b.street} -- {dist} метров. \
-Бюджет на маршрут: {budget} рублей на человека. {extra_notes_text} Маршрут должен содержать не более 5 промежуточных \
-точек и быть интересным и наиболее подходящим для данного случая. В маршруте должен быть \
-либо одно кафе или ресторан, либо вообще без кафе и ресторанов, только если пользователь не попросил больше! \
-Все точки должны быть уникальными (в частности, ни одна промежуточная точка не должна совпадать \
-с точками {a.street} и {b.street})! Ты можешь спрашивать какие есть подходящие точки, \
-сделав запрос get_places. В качестве аргумента передай, какого типа точки тебе нужны. \
-Функция вернет тебе адреса, краткие описания и id всех подходящих заведений, а также их расстояния \
-до начальной и конечной точек маршрута в метрах. Обязательно учитывай эти расстояния для определения порядка точек в маршруте! Не бери в маршрут \
-точки, которые находятся слишком далеко, если поблизости есть аналоги (пусть и похуже)! НЕЛЬЗЯ, \
-ЧТОБЫ ПРОГУЛКА ПОЛУЧИЛАСЬ ДОЛЬШЕ, ЧЕМ ХОЧЕТ ПОЛЬЗОВАТЕЛЬ! Также постарайся сделать её не сильно короче! \
-Когда будешь готов добавить точку в маршрут, вызови функцию message и передай ей описание маршрута с адресами и массив id \
-точек. За раз можно сделать только один запрос к функциям. Всего, прежде чем выдать ответ, сделай не \
-более 5 запросов. После 5 запросов обязательно выведи ответ, если не сделал этого раньше!!! Начальную и \
-конечную точку не нужно добавлять в маршрут! Также сделай чтобы выбранные тобой точки обходились в \
-оптимальном порядке (ЭТО ОЧЕНЬ ВАЖНО)!!!! Сделай, чтобы суммарное расстояние в маршруте было как можно меньше, \
-при этом необязательно минимизировать количество точек!! Если в маршруте есть кафе, то добавь его \
-название в описание маршрута в message"
+        system_prompt = f"You are planning a pedestrian route in Sirius, Russia. \
+Build a route for a \"{route_types.get(w_type, 'friendly walk')}\" that starts at {a.street} and ends at {b.street}. \
+The route should take about {time} minutes. The direct distance between {a.street} and {b.street} is {dist} meters. \
+Budget: {budget} RUB per person. {extra_notes_text} The route must contain at most 5 intermediate stops and should be interesting and relevant for the user request. \
+Include either one cafe or restaurant, or none at all, unless the user explicitly asks for more. \
+All stops must be unique, and no intermediate stop may be the same as the start or end point. \
+Use the get_places tool to search for suitable locations. Pass a query describing the type of places you need. \
+The tool returns addresses, short descriptions, ids, and distances to the start and end points in meters. \
+You must use those distances to choose an efficient order. Prefer nearby good options over far away options. \
+The final route must not be longer than the user requested, and should not be much shorter either. \
+When you are ready, call the message tool with a route description and the array of selected point ids. \
+Make only one tool call per assistant turn. Use no more than 5 tool calls before the final message. \
+Do not include the start or end point ids in the final route. Minimize total walking distance while still making the route interesting. \
+If the route includes a cafe, mention its name in the route description. \
+Return the final route description in {output_language}. Keep place names and addresses in their original form when needed."
 
         desc_ans = "no-description"
         ans_id = []

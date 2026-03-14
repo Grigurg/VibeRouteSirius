@@ -4,12 +4,15 @@ from app.geocoding import forward_geocode, reverse_geocode_coords
 from app.planner import (
     MODEL_OPTIONS,
     PLACES,
-    VIBES,
     build_summary,
+    get_ui_text,
+    get_vibes,
     get_end_location_coords,
     get_places,
     get_start_location_coords,
+    normalize_language,
     parse_form,
+    LANGUAGES,
 )
 from app.llm import DEFAULT_MODEL
 
@@ -25,13 +28,14 @@ def init_app(app):
         if request.method == "POST":
             loading = True
             formdata = parse_form(request.form)
+            lang = normalize_language(formdata.get("lang", "ru"))
             start_coords = get_start_location_coords(request.form)
             end_coords = get_end_location_coords(request.form)
 
             if not start_coords and formdata.get("start_addr"):
-                start_coords = forward_geocode(formdata.get("start_addr"))
+                start_coords = forward_geocode(formdata.get("start_addr"), lang)
             if not end_coords and formdata.get("end_addr"):
-                end_coords = forward_geocode(formdata.get("end_addr"))
+                end_coords = forward_geocode(formdata.get("end_addr"), lang)
 
             if start_coords:
                 formdata["start_lat"] = str(start_coords["lat"])
@@ -45,8 +49,13 @@ def init_app(app):
             loading = False
         else:
             for key in [
+                "lang",
                 "start_addr",
                 "end_addr",
+                "start_lat",
+                "start_lng",
+                "end_lat",
+                "end_lng",
                 "duration_hrs",
                 "duration_mins",
                 "budget",
@@ -60,17 +69,20 @@ def init_app(app):
                 if key in request.args:
                     formdata[key] = request.args[key]
 
-            if not request.args:
-                formdata.setdefault("start_addr", "Сириус Арена, Сириус")
-                formdata.setdefault("end_addr", "Сочи Парк, Сириус")
-                formdata.setdefault("start_lat", "43.40881998152516")
-                formdata.setdefault("start_lng", "39.952640447932154")
-                formdata.setdefault("end_lat", "43.4047")
-                formdata.setdefault("end_lng", "39.9670")
-                formdata.setdefault("model", DEFAULT_MODEL)
-                formdata.setdefault("map_lat", "43.4085")
-                formdata.setdefault("map_lng", "39.9625")
-                formdata.setdefault("map_zoom", "14")
+            formdata.setdefault("lang", "ru")
+            formdata.setdefault("start_addr", "Сириус Арена, Сириус")
+            formdata.setdefault("end_addr", "Сочи Парк, Сириус")
+            formdata.setdefault("start_lat", "43.40881998152516")
+            formdata.setdefault("start_lng", "39.952640447932154")
+            formdata.setdefault("end_lat", "43.4047")
+            formdata.setdefault("end_lng", "39.9670")
+            formdata.setdefault("model", DEFAULT_MODEL)
+            formdata.setdefault("map_lat", "43.4085")
+            formdata.setdefault("map_lng", "39.9625")
+            formdata.setdefault("map_zoom", "14")
+
+        lang = normalize_language(formdata.get("lang", "ru"))
+        formdata["lang"] = lang
 
         if result_data is not None:
             try:
@@ -86,7 +98,9 @@ def init_app(app):
         return render_template(
             "index.html",
             formdata=formdata,
-            vibes=VIBES,
+            ui=get_ui_text(lang),
+            languages=LANGUAGES,
+            vibes=get_vibes(lang),
             model_options=MODEL_OPTIONS,
             result_data=result_data,
             generated=generated,
@@ -98,14 +112,16 @@ def init_app(app):
     def reverse_geocode():
         lat = request.args.get("lat", "")
         lng = request.args.get("lng", "")
-        return jsonify({"address": reverse_geocode_coords(lat, lng)})
+        lang = normalize_language(request.args.get("lang", "ru"))
+        return jsonify({"address": reverse_geocode_coords(lat, lng, lang)})
 
     @app.route("/geocode")
     def geocode():
         query = (request.args.get("query", "") or "").strip()
+        lang = normalize_language(request.args.get("lang", "ru"))
         if not query:
             return jsonify({"lat": None, "lng": None})
-        coords = forward_geocode(query)
+        coords = forward_geocode(query, lang)
         if coords:
             return jsonify(coords)
         return jsonify({"lat": None, "lng": None})

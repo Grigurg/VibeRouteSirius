@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="{{ ui.html_lang }}">
 
 <head>
     <meta charset="UTF-8">
-    <title>VibeRoute — Твой идеальный маршрут, созданный AI</title>
+    <title>{{ ui.title }}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" href="/style.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
@@ -64,23 +64,28 @@
         <div class="logo">
             VibeRoute
         </div>
-        <div class="desc">Твой идеальный маршрут, созданный AI</div>
+        <div class="desc">{{ ui.tagline }}</div>
         <div class="header-btns">
+            <select id="langSwitcher" style="padding: 10px 14px; border: 1px solid #d9e0e7; border-radius: 10px; background: white; font-size: 15px; font-weight: 600; color: #1e293b; cursor: pointer;">
+                {% for lang_code, lang_name in languages.items() %}
+                <option value="{{ lang_code }}" {% if formdata.lang|default('ru') == lang_code %}selected{% endif %}>{{ lang_name }}</option>
+                {% endfor %}
+            </select>
             <button
-                onclick="alert('VibeRoute — сервис планирования прогулок и маршрутов по настроению, бюджету и времени. Powered by AI.')">О
-                проекте</button>
+                onclick="alert({{ ui.about_text|tojson }})">{{ ui.about_button }}</button>
         </div>
     </div>
     <form id="mainform" method="post" style="margin:0;padding:0;">
         <div class="container">
             <div class="leftcol">
                 <div class="params">
+                    <input type="hidden" id="lang" name="lang" value="{{ formdata.lang|default('ru') }}">
                     <div class="param-block route-pts">
-                        <label for="start_addr">Откуда начать?</label>
+                        <label for="start_addr">{{ ui.start_label }}</label>
                         <div style="display:flex;gap:10px;margin-bottom:6px;">
-                            <input type="text" id="start_addr" name="start_addr" placeholder="Введите адрес..."
+                            <input type="text" id="start_addr" name="start_addr" placeholder="{{ ui.start_placeholder }}"
                                 style="flex:1;" value="{{ formdata.start_addr|default('')}}" maxlength="200">
-                            <button type="button" onclick="geoLocateStart()" title="Использовать геопозицию"
+                            <button type="button" onclick="geoLocateStart()" title="{{ ui.start_geo_title }}"
                                 style="border:none;background:none;cursor:pointer;font-size:1.35rem;">📍</button>
                         </div>
                         <!-- Скрытые поля для координат начального местоположения -->
@@ -92,12 +97,12 @@
                         <input type="hidden" id="map_lng" name="map_lng" value="{{ formdata.map_lng|default('')}}">
                         <input type="hidden" id="map_zoom" name="map_zoom" value="{{ formdata.map_zoom|default('')}}">
 
-                        <label for="end_addr" style="margin-top:16px;">Куда хочешь прийти?</label>
+                        <label for="end_addr" style="margin-top:16px;">{{ ui.end_label }}</label>
                         <div style="display:flex;gap:10px;margin-bottom:6px;">
-                            <input type="text" id="end_addr" name="end_addr" placeholder="Введите адрес..."
+                            <input type="text" id="end_addr" name="end_addr" placeholder="{{ ui.end_placeholder }}"
                                 style="flex:1;" value="{{ formdata.end_addr|default('')}}" maxlength="200">
 
-                            <button type="button" onclick="geoLocateEnd()" title="Указать конечную точку по геопозиции"
+                            <button type="button" onclick="geoLocateEnd()" title="{{ ui.end_geo_title }}"
                                 style="border:none;background:none;cursor:pointer;font-size:1.35rem;">
                                 📍
                             </button>
@@ -107,14 +112,14 @@
 
                     </div>
                     <div class="param-block walk-details">
-                        <label class="section-label">Длительность прогулки</label>
+                        <label class="section-label">{{ ui.duration_label }}</label>
                         <div class="flex gap budget-row" style="margin-top:5px;align-items:center;">
                             <input type="range" min="60" max="480" step="15"
                                 value="{{ formdata.duration_hrs|default(2)*60 + formdata.duration_mins|default(0) }}"
                                 id="duration_slider" style="flex:1;" oninput="updateDurationLabel(this.value)">
                             <span class="slider-label" style="width:90px;">
-                                <span id="durationLabel">{{ formdata.duration_hrs|default(2) }} ч {{
-                                    formdata.duration_mins|default(0) }} мин</span>
+                                <span id="durationLabel">{{ formdata.duration_hrs|default(2) }} {{ ui.duration_hours }} {{
+                                    formdata.duration_mins|default(0) }} {{ ui.duration_minutes }}</span>
                             </span>
                             <input type="hidden" name="duration_hrs" id="duration_hrs">
                             <input type="hidden" name="duration_mins" id="duration_mins">
@@ -122,8 +127,8 @@
 
                         <hr class="section-divider">
 
-                        <label class="section-label">Бюджет на человека <span
-                                style="font-size:0.98em;color:#aaa;">(₽)</span></label>
+                        <label class="section-label">{{ ui.budget_label }} <span
+                                style="font-size:0.98em;color:#aaa;">{{ ui.budget_hint }}</span></label>
                         <div class="flex gap budget-row" style="margin-top:5px;align-items:center;">
                             <input type="range" min="500" max="10000" step="100"
                                 value="{{ formdata.budget|default(2000) }}" id="budget_slider" style="width:110px;"
@@ -131,15 +136,15 @@
                             <span class="slider-label"><input type="number" name="budget" min="500" max="10000"
                                     step="100" id="budgetValInp" value="{{ formdata.budget|default(2000) }}"
                                     style="width:90px;" oninput="budget_slider.value=this.value"></span>
-                            <button type="button" class="pres-budget" onclick="setBudget(1000)">Эконом</button>
-                            <button type="button" class="pres-budget" onclick="setBudget(3000)">Средний</button>
-                            <button type="button" class="pres-budget" onclick="setBudget(6000)">Комфортный</button>
-                            <button type="button" class="pres-budget" onclick="setBudget(10000)">Безлимитный</button>
+                            <button type="button" class="pres-budget" onclick="setBudget(1000)">{{ ui.budget_economy }}</button>
+                            <button type="button" class="pres-budget" onclick="setBudget(3000)">{{ ui.budget_medium }}</button>
+                            <button type="button" class="pres-budget" onclick="setBudget(6000)">{{ ui.budget_comfort }}</button>
+                            <button type="button" class="pres-budget" onclick="setBudget(10000)">{{ ui.budget_unlimited }}</button>
                         </div>
 
                         <hr class="section-divider">
 
-                        <label class="section-label">Характер прогулки</label>
+                        <label class="section-label">{{ ui.vibe_label }}</label>
                         <div class="char-vibe-cards" id="vibe-cards">
                             {% for v in vibes %}
                             <div class="char-vibe-card {% if formdata.vibe==v[0] %}selected{% endif %}"
@@ -152,12 +157,12 @@
 
                         <hr class="section-divider">
 
-                        <label class="section-label">Свои пожелания</label>
-                        <textarea name="extra_notes" placeholder="Опишите ваши пожелания..." style="width:100%;min-height:80px;resize:vertical;" maxlength="1000">{{ formdata.extra_notes|default('') }}</textarea>
+                        <label class="section-label">{{ ui.notes_label }}</label>
+                        <textarea name="extra_notes" placeholder="{{ ui.notes_placeholder }}" style="width:100%;min-height:80px;resize:vertical;" maxlength="1000">{{ formdata.extra_notes|default('') }}</textarea>
 
                         <hr class="section-divider">
 
-                        <label class="section-label">Выберите модель для генерации маршрута</label>
+                        <label class="section-label">{{ ui.model_label }}</label>
                         <select name="model" style="margin-top:5px; width: 250px; padding: 12px 16px; border: 2px solid #e1e5e9; border-radius: 12px; background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%); font-size: 16px; font-weight: 600; color: #1e293b; cursor: pointer; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); outline: none; position: relative;">
                             {% for model_value, model_label in model_options %}
                             <option value="{{ model_value }}" {% if formdata.model|default('gpt-4o-mini') == model_value %}selected{% endif %}>{{ model_label }}</option>
@@ -165,7 +170,7 @@
                         </select>
                     </div>
                     <button class="btn-main" type="submit" id="submitBtn" {% if loading %}disabled{% endif %}>
-                        {% if loading %}<span id="spinner">⏳</span> Генерируем...{% else %}Создать Маршрут{% endif %}
+                        {% if loading %}<span id="spinner">⏳</span> {{ ui.submit_loading }}{% else %}{{ ui.submit_idle }}{% endif %}
                     </button>
                 </div>
             </div>
@@ -176,25 +181,25 @@
     </form>
     {% if generated %}
     <div class="result-area" id="results">
-        <h2 class="result-h">Твой идеальный маршрут!</h2>
+        <h2 class="result-h">{{ ui.result_title }}</h2>
         <div class="result-metrics">
             <div class="metric">
-                <span class="metric-label">Тип прогулки</span>
+                <span class="metric-label">{{ ui.metric_vibe }}</span>
                 <span class="metric-val">{{ result_data.vibe_verbose }}</span>
             </div>
             <div class="metric">
-                <span class="metric-label">Длительность</span>
+                <span class="metric-label">{{ ui.metric_duration }}</span>
                 <span class="metric-val">{{ result_data.duration_str }}</span>
             </div>
             <div class="metric">
-                <span class="metric-label">Бюджет</span>
+                <span class="metric-label">{{ ui.metric_budget }}</span>
                 <span class="metric-val">{{ result_data.budget }} ₽</span>
             </div>
         </div>
-        <h3 style="margin:26px 0 9px 0;">Пошаговый план маршрута</h3>
+        <h3 style="margin:26px 0 9px 0;">{{ ui.steps_title }}</h3>
         {% if result_data.route_description %}
         <div class="route-description" style="margin: 20px 0; padding: 20px; background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%); border-radius: 12px; border: 1px solid #e1e5e9; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); position: relative;">
-            <div style="position: absolute; top: -10px; left: 20px; background: #1e88e5; color: white; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Описание маршрута</div>
+            <div style="position: absolute; top: -10px; left: 20px; background: #1e88e5; color: white; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">{{ ui.route_badge }}</div>
             <div style="margin-top: 10px; line-height: 1.7; color: #374151; font-size: 16px; white-space: pre-line;">{{ result_data.route_description|safe }}</div>
         </div>
         {% endif %}
@@ -211,15 +216,73 @@
     <script src="https://unpkg.com/leaflet-routing-machine-openrouteservice/dist/leaflet-routing-openrouteservice.min.js"></script>
 
     <script>
+        const UI_TEXT = {{ ui|tojson }};
+        const SELECTED_LANG = {{ formdata.lang|default('ru')|tojson }};
+        const langSwitcher = document.getElementById('langSwitcher');
         const durationSlider = document.getElementById('duration_slider');
         const durationLabel = document.getElementById('durationLabel');
         const durationHoursInput = document.getElementById('duration_hrs');
         const durationMinsInput = document.getElementById('duration_mins');
 
+        function buildLanguageSwitchUrl(lang) {
+            const params = new URLSearchParams();
+            params.set('lang', lang);
+
+            const fieldIds = [
+                'start_addr',
+                'end_addr',
+                'start_lat',
+                'start_lng',
+                'end_lat',
+                'end_lng',
+                'map_lat',
+                'map_lng',
+                'map_zoom',
+                'duration_hrs',
+                'duration_mins',
+                'vibe',
+                'lang',
+            ];
+
+            fieldIds.forEach((id) => {
+                const el = document.getElementById(id);
+                if (el && el.value) {
+                    params.set(id, el.value);
+                }
+            });
+
+            const notesEl = document.querySelector('textarea[name="extra_notes"]');
+            if (notesEl && notesEl.value) {
+                params.set('extra_notes', notesEl.value);
+            }
+
+            const modelEl = document.querySelector('select[name="model"]');
+            if (modelEl && modelEl.value) {
+                params.set('model', modelEl.value);
+            }
+
+            const budgetEl = document.getElementById('budgetValInp');
+            if (budgetEl && budgetEl.value) {
+                params.set('budget', budgetEl.value);
+            }
+
+            return '/?' + params.toString();
+        }
+
+        if (langSwitcher) {
+            langSwitcher.addEventListener('change', function () {
+                const langInput = document.getElementById('lang');
+                if (langInput) {
+                    langInput.value = this.value;
+                }
+                window.location.href = buildLanguageSwitchUrl(this.value);
+            });
+        }
+
         function updateDurationLabel(value) {
             const hours = Math.floor(value / 60);
             const mins = value % 60;
-            durationLabel.textContent = `${hours} ч ${mins} мин`;
+            durationLabel.textContent = `${hours} ${UI_TEXT.duration_hours} ${mins} ${UI_TEXT.duration_minutes}`;
             durationHoursInput.value = hours;
             durationMinsInput.value = mins;
         }
@@ -237,7 +300,7 @@
             const submitBtn = document.getElementById('submitBtn');
             if (submitBtn) {
                 submitBtn.disabled = true;
-                submitBtn.innerHTML = '<span id="spinner">⏳</span> Генерируем...';
+                submitBtn.innerHTML = `<span id="spinner">⏳</span> ${UI_TEXT.submit_loading}`;
             }
 
             // Сохраняем текущие центр и зум карты, чтобы после POST она не сбрасывалась на Москву
@@ -279,8 +342,17 @@
         const initialZoom = parseInt(mapZoomField && mapZoomField.value) || 12;
 
         let map = L.map('map').setView([initialLat, initialLng], initialZoom);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap'
+        const tileConfig = SELECTED_LANG === 'en'
+            ? {
+                url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+                attribution: 'Tiles © Esri'
+            }
+            : {
+                url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                attribution: '© OpenStreetMap'
+            };
+        L.tileLayer(tileConfig.url, {
+            attribution: tileConfig.attribution
         }).addTo(map);
 
         const IS_GENERATED = (document.body && document.body.dataset && document.body.dataset.generated === '1');
@@ -316,7 +388,7 @@
 
         // Функция для обновления адреса по координатам
         function updateAddressFromCoords(lat, lng, marker) {
-            fetch('/reverse_geocode?lat=' + lat + '&lng=' + lng)
+            fetch('/reverse_geocode?lat=' + lat + '&lng=' + lng + '&lang=' + encodeURIComponent(SELECTED_LANG))
                 .then(r => r.json())
                 .then(res => {
                     const inp = document.getElementById('start_addr');
@@ -324,7 +396,7 @@
                         inp.value = res.address || '';
                     }
                     if (marker) {
-                        marker.setTooltipContent('Старт: ' + (res.address || ''));
+                        marker.setTooltipContent(`${UI_TEXT.marker_start}: ` + (res.address || ''));
                     }
                     // Обновляем сохранённые координаты
                     currentLocationCoords = { lat: lat, lng: lng };
@@ -335,7 +407,7 @@
                         inp.value = `${lat}, ${lng}`;
                     }
                     if (marker) {
-                        marker.setTooltipContent('Старт: ' + `${lat}, ${lng}`);
+                        marker.setTooltipContent(`${UI_TEXT.marker_start}: ` + `${lat}, ${lng}`);
                     }
                 });
         }
@@ -373,7 +445,7 @@
                 const lat = parseFloat(coords[1]);
                 if (![lat, lng].every(n => Number.isFinite(n))) return;
 
-                const name = (place.name || 'Место');
+                const name = (place.name || UI_TEXT.place_fallback);
                 const amenity = (place.amenity || '');
                 const number = index + 1; // Sequential numbering starting from 1
 
@@ -399,11 +471,11 @@
         function geoLocateStart() {
             console.log('geoLocateStart вызвана');
             if (!navigator.geolocation) {
-                alert('Геолокация не поддерживается браузером.');
+                alert(UI_TEXT.geo_unsupported);
                 return;
             }
             if (!map) {
-                alert('Карта ещё не загружена. Подождите немного и попробуйте снова.');
+                alert(UI_TEXT.map_not_ready);
                 return;
             }
             console.log('Запрашиваем геолокацию...');
@@ -429,7 +501,7 @@
                         icon: createColoredIcon('#4CAF50', 'start')
                     }).addTo(map);
                     const startInp = document.getElementById('start_addr');
-                    m.bindTooltip('Старт: ' + ((startInp && startInp.value) ? startInp.value : '')).openTooltip();
+                    m.bindTooltip(`${UI_TEXT.marker_start}: ` + ((startInp && startInp.value) ? startInp.value : '')).openTooltip();
                     markers.push(m);
                     currentLocationMarker = m;
 
@@ -448,17 +520,18 @@
                 },
                 function (err) {
                     console.error('Ошибка геолокации:', err);
-                    let msg = 'Не удалось получить геопозицию.';
-                    if (err.code === 1) msg = 'Доступ к геолокации запрещён в настройках браузера.';
-                    else if (err.code === 2) msg = 'Геопозиция недоступна.';
-                    else if (err.code === 3) msg = 'Превышено время ожидания запроса геолокации.';
+                    let msg = UI_TEXT.geo_failed;
+                    if (err.code === 1) msg = UI_TEXT.geo_denied;
+                    else if (err.code === 2) msg = UI_TEXT.geo_unavailable;
+                    else if (err.code === 3) msg = UI_TEXT.geo_timeout;
+                    else msg = UI_TEXT.geo_failed;
                     alert(msg);
                 }
             );
         }
         function geoLocateEnd() {
             if (!navigator.geolocation) {
-                alert('Геолокация не поддерживается браузером.');
+                alert(UI_TEXT.geo_unsupported);
                 return;
             }
 
@@ -481,7 +554,7 @@
                         icon: createColoredIcon('#F44336', 'end')
                     }).addTo(map);
 
-                    m.bindTooltip('Конечная точка').openTooltip();
+                    m.bindTooltip(UI_TEXT.marker_end_point).openTooltip();
                     markers.push(m);
                     endLocationMarker = m;
 
@@ -489,12 +562,12 @@
                     map.setView([lat, lng], 15);
 
                     // Обновляем адрес в поле
-                    fetch('/reverse_geocode?lat=' + lat + '&lng=' + lng)
+                    fetch('/reverse_geocode?lat=' + lat + '&lng=' + lng + '&lang=' + encodeURIComponent(SELECTED_LANG))
                         .then(r => r.json())
                         .then(res => {
                             const inp = document.getElementById('end_addr');
                             if (inp) inp.value = res.address || '';
-                            m.setTooltipContent('Конец: ' + (res.address || ''));
+                            m.setTooltipContent(`${UI_TEXT.marker_end}: ` + (res.address || ''));
                         });
 
                     // При перетаскивании обновляем адрес
@@ -503,18 +576,18 @@
 
                         endLocationCoords = { lat: p.lat, lng: p.lng };
 
-                        fetch('/reverse_geocode?lat=' + p.lat + '&lng=' + p.lng)
+                        fetch('/reverse_geocode?lat=' + p.lat + '&lng=' + p.lng + '&lang=' + encodeURIComponent(SELECTED_LANG))
                             .then(r => r.json())
                             .then(res => {
                                 const inp = document.getElementById('end_addr');
                                 if (inp) inp.value = res.address || '';
-                                m.setTooltipContent('Конец: ' + (res.address || ''));
+                                m.setTooltipContent(`${UI_TEXT.marker_end}: ` + (res.address || ''));
                             });
                     });
 
                 },
                 function (err) {
-                    alert('Не удалось получить геопозицию.');
+                    alert(UI_TEXT.geo_failed);
                 }
             );
         }
@@ -548,7 +621,7 @@
                         icon: createColoredIcon('#4CAF50', 'start')
                     }).addTo(map);
 
-                    startMarker.bindTooltip('Старт: ' + startInp.value).openTooltip();
+                    startMarker.bindTooltip(`${UI_TEXT.marker_start}: ` + startInp.value).openTooltip();
 
                     startMarker.on('dragend', function (e) {
                         const p = e.target.getLatLng();
@@ -564,7 +637,7 @@
                 }
 
                 if (currentLocationMarker) {
-                    currentLocationMarker.setTooltipContent('Старт: ' + startInp.value);
+                    currentLocationMarker.setTooltipContent(`${UI_TEXT.marker_start}: ` + startInp.value);
                     if (currentLocationCoords) {
                         currentLocationMarker.setLatLng([currentLocationCoords.lat, currentLocationCoords.lng]);
                     }
@@ -587,7 +660,7 @@
                         draggable: true,
                         icon: createColoredIcon('#F44336', 'end')
                     }).addTo(map);
-                    endMarker.bindTooltip('Конец: ' + endInp.value).openTooltip();
+                    endMarker.bindTooltip(`${UI_TEXT.marker_end}: ` + endInp.value).openTooltip();
 
                     // При перетаскивании обновляем адрес
                     endMarker.on('dragend', function (e) {
@@ -595,12 +668,12 @@
 
                         endLocationCoords = { lat: p.lat, lng: p.lng };
 
-                        fetch('/reverse_geocode?lat=' + p.lat + '&lng=' + p.lng)
+                        fetch('/reverse_geocode?lat=' + p.lat + '&lng=' + p.lng + '&lang=' + encodeURIComponent(SELECTED_LANG))
                             .then(r => r.json())
                             .then(res => {
                                 const inp = document.getElementById('end_addr');
                                 if (inp) inp.value = res.address || '';
-                                endMarker.setTooltipContent('Конец: ' + (res.address || ''));
+                                endMarker.setTooltipContent(`${UI_TEXT.marker_end}: ` + (res.address || ''));
                             });
                     });
 
@@ -608,7 +681,7 @@
                     endLocationMarker = endMarker;
                 } else {
                     // Если маркер уже существует — обновим подпись и (если есть) координаты
-                    endLocationMarker.setTooltipContent('Конец: ' + endInp.value);
+                    endLocationMarker.setTooltipContent(`${UI_TEXT.marker_end}: ` + endInp.value);
                     if (endLocationCoords) {
                         endLocationMarker.setLatLng([endLocationCoords.lat, endLocationCoords.lng]);
                     }
@@ -623,7 +696,7 @@
 
         map.on('click', function (e) {
             let lat = e.latlng.lat, lng = e.latlng.lng;
-            fetch('/reverse_geocode?lat=' + lat + '&lng=' + lng).then(
+            fetch('/reverse_geocode?lat=' + lat + '&lng=' + lng + '&lang=' + encodeURIComponent(SELECTED_LANG)).then(
                 r => r.json()).then(res => {
                     let end = document.getElementById('end_addr');
                     if (end && !end.value) end.value = res.address;
@@ -639,7 +712,7 @@
             const q = (startInp.value || '').trim();
             if (!q) return;
 
-            fetch('/geocode?query=' + encodeURIComponent(q))
+            fetch('/geocode?query=' + encodeURIComponent(q) + '&lang=' + encodeURIComponent(SELECTED_LANG))
                 .then(r => r.json())
                 .then(res => {
                     if (!res || res.lat === null || res.lng === null) return;
@@ -655,7 +728,7 @@
                             draggable: true,
                             icon: createColoredIcon('#4CAF50', 'start')
                         }).addTo(map);
-                        currentLocationMarker.bindTooltip('Старт: ' + q).openTooltip();
+                        currentLocationMarker.bindTooltip(`${UI_TEXT.marker_start}: ` + q).openTooltip();
                         markers.push(currentLocationMarker);
 
                         currentLocationMarker.on('dragend', function (e) {
@@ -668,7 +741,7 @@
                         });
                     } else {
                         currentLocationMarker.setLatLng([res.lat, res.lng]);
-                        currentLocationMarker.setTooltipContent('Старт: ' + q);
+                        currentLocationMarker.setTooltipContent(`${UI_TEXT.marker_start}: ` + q);
                         if (!map.hasLayer(currentLocationMarker)) currentLocationMarker.addTo(map);
                     }
 
@@ -697,7 +770,7 @@
             const q = (endInp.value || '').trim();
             if (!q) return;
 
-            fetch('/geocode?query=' + encodeURIComponent(q))
+            fetch('/geocode?query=' + encodeURIComponent(q) + '&lang=' + encodeURIComponent(SELECTED_LANG))
                 .then(r => r.json())
                 .then(res => {
                     if (!res || res.lat === null || res.lng === null) return;
@@ -713,7 +786,7 @@
                             draggable: true,
                             icon: createColoredIcon('#F44336', 'end')
                         }).addTo(map);
-                        endLocationMarker.bindTooltip('Конец: ' + q).openTooltip();
+                        endLocationMarker.bindTooltip(`${UI_TEXT.marker_end}: ` + q).openTooltip();
                         markers.push(endLocationMarker);
 
                         endLocationMarker.on('dragend', function (e) {
@@ -721,17 +794,17 @@
 
                             endLocationCoords = { lat: p.lat, lng: p.lng };
 
-                            fetch('/reverse_geocode?lat=' + p.lat + '&lng=' + p.lng)
+                            fetch('/reverse_geocode?lat=' + p.lat + '&lng=' + p.lng + '&lang=' + encodeURIComponent(SELECTED_LANG))
                                 .then(r => r.json())
                                 .then(res => {
                                     const inp = document.getElementById('end_addr');
                                     if (inp) inp.value = res.address || '';
-                                    endLocationMarker.setTooltipContent('Конец: ' + (res.address || ''));
+                                    endLocationMarker.setTooltipContent(`${UI_TEXT.marker_end}: ` + (res.address || ''));
                                 });
                         });
                     } else {
                         endLocationMarker.setLatLng([res.lat, res.lng]);
-                        endLocationMarker.setTooltipContent('Конец: ' + q);
+                        endLocationMarker.setTooltipContent(`${UI_TEXT.marker_end}: ` + q);
                         if (!map.hasLayer(endLocationMarker)) endLocationMarker.addTo(map);
                     }
 

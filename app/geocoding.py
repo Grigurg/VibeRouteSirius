@@ -1,10 +1,16 @@
 import requests
 
 
-def forward_geocode(query):
+def normalize_geocode_language(lang):
+    return "en" if lang == "en" else "ru"
+
+
+def forward_geocode(query, lang="ru"):
     query = (query or "").strip()
     if not query:
         return None
+
+    accept_language = normalize_geocode_language(lang)
 
     try:
         yandex_resp = requests.get(
@@ -27,7 +33,7 @@ def forward_geocode(query):
     try:
         nominatim_resp = requests.get(
             "https://nominatim.openstreetmap.org/search",
-            params={"format": "jsonv2", "q": query, "limit": 1, "accept-language": "ru"},
+            params={"format": "jsonv2", "q": query, "limit": 1, "accept-language": accept_language},
             headers={"User-Agent": "viberoute-demo/1.0"},
             timeout=5,
         )
@@ -41,10 +47,11 @@ def forward_geocode(query):
     return None
 
 
-def reverse_geocode_coords(lat, lng):
+def reverse_geocode_coords(lat, lng, lang="ru"):
     if not lat or not lng:
         return ""
 
+    accept_language = normalize_geocode_language(lang)
     address = ""
     try:
         yandex_resp = requests.get(
@@ -65,7 +72,7 @@ def reverse_geocode_coords(lat, lng):
         try:
             nominatim_resp = requests.get(
                 "https://nominatim.openstreetmap.org/reverse",
-                params={"format": "jsonv2", "lat": lat, "lon": lng, "accept-language": "ru"},
+                params={"format": "jsonv2", "lat": lat, "lon": lng, "accept-language": accept_language},
                 headers={"User-Agent": "viberoute-demo/1.0"},
                 timeout=5,
             )
