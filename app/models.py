@@ -24,7 +24,7 @@ class Object:
 
     def dist_between_points(self, other):
         radius = 6371000
-        lat1, lon1, lat2, lon2 = map(math.radians, [self.x, self.y, other.x, other.y])
+        lon1, lat1, lon2, lat2 = map(math.radians, [self.x, self.y, other.x, other.y])
 
         dlat = lat2 - lat1
         dlon = lon2 - lon1

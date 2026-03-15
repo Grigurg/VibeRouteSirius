@@ -27,6 +27,7 @@ UI_TEXT = {
         "duration_label": "Длительность прогулки",
         "duration_hours": "ч",
         "duration_minutes": "мин",
+        "pace_label": "Темп прогулки",
         "budget_label": "Бюджет на человека",
         "budget_hint": "(₽)",
         "budget_economy": "Эконом",
@@ -42,6 +43,8 @@ UI_TEXT = {
         "result_title": "Твой идеальный маршрут!",
         "metric_vibe": "Тип прогулки",
         "metric_duration": "Длительность",
+        "metric_pace": "Темп",
+        "metric_distance": "Дистанция",
         "metric_budget": "Бюджет",
         "steps_title": "Пошаговый план маршрута",
         "route_badge": "Описание маршрута",
@@ -72,6 +75,7 @@ UI_TEXT = {
         "duration_label": "Walk duration",
         "duration_hours": "h",
         "duration_minutes": "min",
+        "pace_label": "Walking pace",
         "budget_label": "Budget per person",
         "budget_hint": "(₽)",
         "budget_economy": "Budget",
@@ -87,6 +91,8 @@ UI_TEXT = {
         "result_title": "Your perfect route!",
         "metric_vibe": "Walk style",
         "metric_duration": "Duration",
+        "metric_pace": "Pace",
+        "metric_distance": "Distance",
         "metric_budget": "Budget",
         "steps_title": "Step-by-step route plan",
         "route_badge": "Route description",
@@ -113,16 +119,23 @@ VIBE_LABELS = {
 }
 
 VIBES = list(VIBE_LABELS.keys())
+PACE_LABELS = {
+    "relaxed": {"emoji": "🌿", "ru": "Спокойный", "en": "Relaxed"},
+    "normal": {"emoji": "🚶", "ru": "Обычный", "en": "Normal"},
+    "active": {"emoji": "⚡", "ru": "Бодрый", "en": "Active"},
+}
+
+PACE_OPTIONS = list(PACE_LABELS.keys())
 PLACES = [
     {
-        "type": "Feature",
-        "properties": {"amenity": "cafe", "name": "Шоколадница"},
-        "geometry": {"type": "Point", "coordinates": [39.9262057, 43.4272589]},
+        "name": "Шоколадница",
+        "amenity": "cafe",
+        "coordinates": [39.9262057, 43.4272589],
     },
     {
-        "type": "Feature",
-        "properties": {"amenity": "pub", "name": "O'Sullivan's Irish Pub"},
-        "geometry": {"type": "Point", "coordinates": [39.9755125, 43.3964213]},
+        "name": "O'Sullivan's Irish Pub",
+        "amenity": "pub",
+        "coordinates": [39.9755125, 43.3964213],
     },
 ]
 MODEL_OPTIONS = [
@@ -143,6 +156,12 @@ def normalize_language(lang):
     return "ru"
 
 
+def normalize_pace(pace):
+    if pace in PACE_OPTIONS:
+        return pace
+    return "relaxed"
+
+
 def get_ui_text(lang):
     return UI_TEXT[normalize_language(lang)]
 
@@ -152,6 +171,14 @@ def get_vibes(lang):
     return [
         (vibe_key, vibe_data["emoji"], vibe_data[normalized_lang])
         for vibe_key, vibe_data in VIBE_LABELS.items()
+    ]
+
+
+def get_paces(lang):
+    normalized_lang = normalize_language(lang)
+    return [
+        (pace_key, pace_data["emoji"], pace_data[normalized_lang])
+        for pace_key, pace_data in PACE_LABELS.items()
     ]
 
 
@@ -179,6 +206,7 @@ def parse_form(req_form):
         "end_lng": req_form.get("end_lng", ""),
         "duration_hrs": int(req_form.get("duration_hrs", 2)),
         "duration_mins": int(req_form.get("duration_mins", 0)),
+        "pace": normalize_pace(req_form.get("pace", "relaxed")),
         "budget": int(req_form.get("budget", 2000)),
         "vibe": req_form.get("vibe", "friendly"),
         "extra_notes": req_form.get("extra_notes", ""),
@@ -215,8 +243,8 @@ def get_places(formdata):
     global PLACES
     database = get_database()
     agent = get_agent()
-    start_object = Object(float(formdata["start_lat"]), float(formdata["start_lng"]), formdata["start_addr"])
-    end_object = Object(float(formdata["end_lat"]), float(formdata["end_lng"]), formdata["end_addr"])
+    start_object = Object(float(formdata["start_lng"]), float(formdata["start_lat"]), formdata["start_addr"])
+    end_object = Object(float(formdata["end_lng"]), float(formdata["end_lat"]), formdata["end_addr"])
     time_minutes = formdata["duration_hrs"] * 60 + formdata["duration_mins"]
 
     description, indices = agent.get_answer(
@@ -224,11 +252,13 @@ def get_places(formdata):
         end_object,
         formdata["vibe"],
         time_minutes,
+        formdata["pace"],
         formdata["budget"],
         formdata["extra_notes"],
         formdata["model"],
         formdata.get("lang", "ru"),
     )
+    total_distance_m = agent.calculate_route_distance(start_object, indices, end_object)
 
     PLACES.clear()
     for index in indices:
@@ -241,11 +271,15 @@ def get_places(formdata):
                     "coordinates": [point.x, point.y],
                 }
             )
-    return PLACES, description
+    return PLACES, description, total_distance_m
 
 
 def get_vibe_verbose(vibe):
     return VIBE_LABELS.get(vibe, VIBE_LABELS["friendly"])
+
+
+def get_pace_verbose(pace):
+    return PACE_LABELS.get(pace, PACE_LABELS["relaxed"])
 
 
 def demo_route_steps(formdata):
@@ -325,6 +359,7 @@ def build_summary(formdata):
     ui = get_ui_text(lang)
     return {
         "vibe_verbose": get_vibe_verbose(formdata["vibe"])[lang],
+        "pace_verbose": get_pace_verbose(formdata.get("pace", "relaxed"))[lang],
         "duration_str": (
             f"{formdata['duration_hrs']} {ui['duration_hours']} {formdata['duration_mins']} {ui['duration_minutes']}"
             if formdata["duration_mins"]
@@ -332,7 +367,7 @@ def build_summary(formdata):
         ),
         "budget": formdata["budget"],
         "model": formdata["model"],
-        "distance": f"{5.2 + random.randint(-1, 2) * 0.3:.1f}",
+        "distance": None,
         "steps": steps,
         "tips": demo_tips(formdata),
     }

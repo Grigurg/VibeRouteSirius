@@ -41,32 +41,122 @@
             border-top: 1px solid #ddd;
             margin: 15px 0;
         }
-        .leftcol {
-            width: 60%;
+        .lang-switcher {
+            padding: 10px 14px;
+            border: 1px solid #d9e0e7;
+            border-radius: 10px;
+            background: white;
+            font-size: 15px;
+            font-weight: 600;
+            color: #1e293b;
+            cursor: pointer;
         }
-        .rightcol {
-            width: 40%;
+        .addr-row {
+            display:flex;
+            gap:10px;
+            margin-bottom:6px;
         }
-        .char-vibe-cards {
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: space-between;
+        .addr-input {
+            flex:1;
         }
-        .char-vibe-cards .char-vibe-card {
-            width: calc(50% - 5px);
-            margin-bottom: 10px;
+        .geo-btn {
+            border:none;
+            background:none;
+            cursor:pointer;
+            font-size:1.35rem;
+            flex: 0 0 auto;
+            width: 44px;
+            height: 44px;
+        }
+        .budget-control-row,
+        .duration-control-row {
+            margin-top:5px;
+            align-items:center;
+        }
+        .duration-label-wrap {
+            width:90px;
+        }
+        .budget-input-wrap input {
+            width:90px;
+        }
+        .model-select {
+            margin-top:5px;
+            width: 250px;
+            max-width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e1e5e9;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+            font-size: 16px;
+            font-weight: 600;
+            color: #1e293b;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            outline: none;
+            position: relative;
+        }
+        .map-panel {
+            width:100%;
+            height:800px;
+            border-radius:14px;
+            box-shadow:0 1px 8px #0002;
+        }
+        @media (max-width: 900px) {
+            .map-panel {
+                height: 58vh;
+                min-height: 360px;
+            }
+        }
+        @media (max-width: 640px) {
+            .header {
+                gap: 14px;
+                align-items: flex-start;
+            }
+            .header-btns {
+                width: 100%;
+                justify-content: space-between;
+            }
+            .lang-switcher {
+                flex: 1;
+                min-width: 0;
+            }
+            .addr-row {
+                align-items: stretch;
+            }
+            .geo-btn {
+                width: 48px;
+                height: 48px;
+            }
+            .duration-control-row,
+            .budget-control-row {
+                gap: 10px;
+            }
+            .duration-label-wrap,
+            .budget-input-wrap {
+                width: 100%;
+            }
+            .model-select {
+                width: 100%;
+            }
+            .map-panel {
+                height: 50vh;
+                min-height: 300px;
+            }
         }
     </style>
 </head>
 
 <body data-generated="{{ 1 if generated else 0 }}">
     <div class="header">
-        <div class="logo">
-            VibeRoute
+        <div class="brand-block">
+            <div class="logo">
+                VibeRoute
+            </div>
+            <div class="desc">{{ ui.tagline }}</div>
         </div>
-        <div class="desc">{{ ui.tagline }}</div>
         <div class="header-btns">
-            <select id="langSwitcher" style="padding: 10px 14px; border: 1px solid #d9e0e7; border-radius: 10px; background: white; font-size: 15px; font-weight: 600; color: #1e293b; cursor: pointer;">
+            <select id="langSwitcher" class="lang-switcher">
                 {% for lang_code, lang_name in languages.items() %}
                 <option value="{{ lang_code }}" {% if formdata.lang|default('ru') == lang_code %}selected{% endif %}>{{ lang_name }}</option>
                 {% endfor %}
@@ -75,141 +165,171 @@
                 onclick="alert({{ ui.about_text|tojson }})">{{ ui.about_button }}</button>
         </div>
     </div>
-    <form id="mainform" method="post" style="margin:0;padding:0;">
-        <div class="container">
-            <div class="leftcol">
-                <div class="params">
-                    <input type="hidden" id="lang" name="lang" value="{{ formdata.lang|default('ru') }}">
-                    <div class="param-block route-pts">
-                        <label for="start_addr">{{ ui.start_label }}</label>
-                        <div style="display:flex;gap:10px;margin-bottom:6px;">
-                            <input type="text" id="start_addr" name="start_addr" placeholder="{{ ui.start_placeholder }}"
-                                style="flex:1;" value="{{ formdata.start_addr|default('')}}" maxlength="200">
-                            <button type="button" onclick="geoLocateStart()" title="{{ ui.start_geo_title }}"
-                                style="border:none;background:none;cursor:pointer;font-size:1.35rem;">📍</button>
-                        </div>
-                        <!-- Скрытые поля для координат начального местоположения -->
-                        <input type="hidden" id="start_lat" name="start_lat" value="{{ formdata.start_lat|default('')}}">
-                        <input type="hidden" id="start_lng" name="start_lng" value="{{ formdata.start_lng|default('')}}">
+    <div class="page-shell">
+        <div class="map-stage">
+            <div id="map" class="map-panel"></div>
+        </div>
+        <div class="sheet-shell" id="mobileSheet">
+            <div class="sheet-handle" id="sheetHandle" aria-hidden="true">
+                <span class="sheet-handle-bar"></span>
+            </div>
+            <div class="sheet-scroll" id="sheetScroll">
+                <div class="sheet-mobile-topbar">
+                    <select id="mobileLangSwitcher" class="mobile-lang-switcher">
+                        {% for lang_code, lang_name in languages.items() %}
+                        <option value="{{ lang_code }}" {% if formdata.lang|default('ru') == lang_code %}selected{% endif %}>{{ lang_name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <form id="mainform" method="post" style="margin:0;padding:0;">
+                    <div class="leftcol">
+                        <div class="params">
+                            <input type="hidden" id="lang" name="lang" value="{{ formdata.lang|default('ru') }}">
+                            <div class="param-block route-pts">
+                                <label for="start_addr">{{ ui.start_label }}</label>
+                                <div class="addr-row">
+                                    <input type="text" id="start_addr" name="start_addr" placeholder="{{ ui.start_placeholder }}"
+                                        class="addr-input" value="{{ formdata.start_addr|default('')}}" maxlength="200">
+                                    <button type="button" onclick="geoLocateStart()" title="{{ ui.start_geo_title }}"
+                                        class="geo-btn">📍</button>
+                                </div>
+                                <input type="hidden" id="start_lat" name="start_lat" value="{{ formdata.start_lat|default('')}}">
+                                <input type="hidden" id="start_lng" name="start_lng" value="{{ formdata.start_lng|default('')}}">
+                                <input type="hidden" id="map_lat" name="map_lat" value="{{ formdata.map_lat|default('')}}">
+                                <input type="hidden" id="map_lng" name="map_lng" value="{{ formdata.map_lng|default('')}}">
+                                <input type="hidden" id="map_zoom" name="map_zoom" value="{{ formdata.map_zoom|default('')}}">
 
-                        <!-- Скрытые поля для сохранения состояния карты -->
-                        <input type="hidden" id="map_lat" name="map_lat" value="{{ formdata.map_lat|default('')}}">
-                        <input type="hidden" id="map_lng" name="map_lng" value="{{ formdata.map_lng|default('')}}">
-                        <input type="hidden" id="map_zoom" name="map_zoom" value="{{ formdata.map_zoom|default('')}}">
+                                <label for="end_addr" style="margin-top:16px;">{{ ui.end_label }}</label>
+                                <div class="addr-row">
+                                    <input type="text" id="end_addr" name="end_addr" placeholder="{{ ui.end_placeholder }}"
+                                        class="addr-input" value="{{ formdata.end_addr|default('')}}" maxlength="200">
+                                    <button type="button" onclick="geoLocateEnd()" title="{{ ui.end_geo_title }}"
+                                        class="geo-btn">📍</button>
+                                </div>
+                                <input type="hidden" id="end_lat" name="end_lat" value="{{ formdata.end_lat|default('')}}">
+                                <input type="hidden" id="end_lng" name="end_lng" value="{{ formdata.end_lng|default('')}}">
+                            </div>
+                            <div class="param-block walk-details">
+                                <label class="section-label">{{ ui.duration_label }}</label>
+                                <div class="flex gap budget-row duration-control-row">
+                                    <input type="range" min="60" max="480" step="15"
+                                        value="{{ formdata.duration_hrs|default(2)*60 + formdata.duration_mins|default(0) }}"
+                                        id="duration_slider" class="range-control" oninput="updateDurationLabel(this.value)">
+                                    <span class="slider-label duration-label-wrap">
+                                        <span id="durationLabel">{{ formdata.duration_hrs|default(2) }} {{ ui.duration_hours }} {{
+                                            formdata.duration_mins|default(0) }} {{ ui.duration_minutes }}</span>
+                                    </span>
+                                    <input type="hidden" name="duration_hrs" id="duration_hrs">
+                                    <input type="hidden" name="duration_mins" id="duration_mins">
+                                </div>
 
-                        <label for="end_addr" style="margin-top:16px;">{{ ui.end_label }}</label>
-                        <div style="display:flex;gap:10px;margin-bottom:6px;">
-                            <input type="text" id="end_addr" name="end_addr" placeholder="{{ ui.end_placeholder }}"
-                                style="flex:1;" value="{{ formdata.end_addr|default('')}}" maxlength="200">
+                                <hr class="section-divider">
 
-                            <button type="button" onclick="geoLocateEnd()" title="{{ ui.end_geo_title }}"
-                                style="border:none;background:none;cursor:pointer;font-size:1.35rem;">
-                                📍
+                                <label class="section-label">{{ ui.pace_label }}</label>
+                                <div class="char-vibe-cards" id="pace-cards">
+                                    {% for p in paces %}
+                                    <div class="char-vibe-card {% if formdata.pace|default('relaxed')==p[0] %}selected{% endif %}"
+                                        data-pace="{{p[0]}}" onclick="selectPace('{{p[0]}}')">
+                                        <span>{{p[1]}}</span> <span>{{p[2]}}</span>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                                <input type="hidden" id="pace" name="pace" value="{{ formdata.pace|default('relaxed') }}">
+
+                                <hr class="section-divider">
+
+                                <label class="section-label">{{ ui.budget_label }} <span
+                                        style="font-size:0.98em;color:#aaa;">{{ ui.budget_hint }}</span></label>
+                                <div class="flex gap budget-row budget-control-row">
+                                    <input type="range" min="500" max="10000" step="100"
+                                        value="{{ formdata.budget|default(2000) }}" id="budget_slider" class="range-control budget-range"
+                                        onchange="budgetValInp.value=this.value">
+                                    <span class="slider-label budget-input-wrap"><input type="number" name="budget" min="500" max="10000"
+                                            step="100" id="budgetValInp" value="{{ formdata.budget|default(2000) }}"
+                                            oninput="budget_slider.value=this.value"></span>
+                                    <button type="button" class="pres-budget" onclick="setBudget(1000)">{{ ui.budget_economy }}</button>
+                                    <button type="button" class="pres-budget" onclick="setBudget(3000)">{{ ui.budget_medium }}</button>
+                                    <button type="button" class="pres-budget" onclick="setBudget(6000)">{{ ui.budget_comfort }}</button>
+                                    <button type="button" class="pres-budget" onclick="setBudget(10000)">{{ ui.budget_unlimited }}</button>
+                                </div>
+
+                                <hr class="section-divider">
+
+                                <label class="section-label">{{ ui.vibe_label }}</label>
+                                <div class="char-vibe-cards" id="vibe-cards">
+                                    {% for v in vibes %}
+                                    <div class="char-vibe-card {% if formdata.vibe==v[0] %}selected{% endif %}"
+                                        data-vibe="{{v[0]}}" onclick="selectVibe('{{v[0]}}')">
+                                        <span>{{v[1]}}</span> <span>{{v[2]}}</span>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                                <input type="hidden" id="vibe" name="vibe" value="{{ formdata.vibe|default('friendly') }}">
+
+                                <hr class="section-divider">
+
+                                <label class="section-label">{{ ui.notes_label }}</label>
+                                <textarea name="extra_notes" class="notes-field" placeholder="{{ ui.notes_placeholder }}" maxlength="1000">{{ formdata.extra_notes|default('') }}</textarea>
+
+                                <hr class="section-divider">
+
+                                <label class="section-label">{{ ui.model_label }}</label>
+                                <select name="model" class="model-select">
+                                    {% for model_value, model_label in model_options %}
+                                    <option value="{{ model_value }}" {% if formdata.model|default('gpt-4o-mini') == model_value %}selected{% endif %}>{{ model_label }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <button class="btn-main" type="submit" id="submitBtn" {% if loading %}disabled{% endif %}>
+                                {% if loading %}<span id="spinner">⏳</span> {{ ui.submit_loading }}{% else %}{{ ui.submit_idle }}{% endif %}
                             </button>
                         </div>
-                        <input type="hidden" id="end_lat" name="end_lat" value="{{ formdata.end_lat|default('')}}">
-                        <input type="hidden" id="end_lng" name="end_lng" value="{{ formdata.end_lng|default('')}}">
-
                     </div>
-                    <div class="param-block walk-details">
-                        <label class="section-label">{{ ui.duration_label }}</label>
-                        <div class="flex gap budget-row" style="margin-top:5px;align-items:center;">
-                            <input type="range" min="60" max="480" step="15"
-                                value="{{ formdata.duration_hrs|default(2)*60 + formdata.duration_mins|default(0) }}"
-                                id="duration_slider" style="flex:1;" oninput="updateDurationLabel(this.value)">
-                            <span class="slider-label" style="width:90px;">
-                                <span id="durationLabel">{{ formdata.duration_hrs|default(2) }} {{ ui.duration_hours }} {{
-                                    formdata.duration_mins|default(0) }} {{ ui.duration_minutes }}</span>
-                            </span>
-                            <input type="hidden" name="duration_hrs" id="duration_hrs">
-                            <input type="hidden" name="duration_mins" id="duration_mins">
+                </form>
+                {% if generated %}
+                <div class="result-area" id="results">
+                    <h2 class="result-h">{{ ui.result_title }}</h2>
+                    <div class="result-metrics">
+                        <div class="metric">
+                            <span class="metric-label">{{ ui.metric_vibe }}</span>
+                            <span class="metric-val">{{ result_data.vibe_verbose }}</span>
                         </div>
-
-                        <hr class="section-divider">
-
-                        <label class="section-label">{{ ui.budget_label }} <span
-                                style="font-size:0.98em;color:#aaa;">{{ ui.budget_hint }}</span></label>
-                        <div class="flex gap budget-row" style="margin-top:5px;align-items:center;">
-                            <input type="range" min="500" max="10000" step="100"
-                                value="{{ formdata.budget|default(2000) }}" id="budget_slider" style="width:110px;"
-                                onchange="budgetValInp.value=this.value">
-                            <span class="slider-label"><input type="number" name="budget" min="500" max="10000"
-                                    step="100" id="budgetValInp" value="{{ formdata.budget|default(2000) }}"
-                                    style="width:90px;" oninput="budget_slider.value=this.value"></span>
-                            <button type="button" class="pres-budget" onclick="setBudget(1000)">{{ ui.budget_economy }}</button>
-                            <button type="button" class="pres-budget" onclick="setBudget(3000)">{{ ui.budget_medium }}</button>
-                            <button type="button" class="pres-budget" onclick="setBudget(6000)">{{ ui.budget_comfort }}</button>
-                            <button type="button" class="pres-budget" onclick="setBudget(10000)">{{ ui.budget_unlimited }}</button>
+                        <div class="metric">
+                            <span class="metric-label">{{ ui.metric_duration }}</span>
+                            <span class="metric-val">{{ result_data.duration_str }}</span>
                         </div>
-
-                        <hr class="section-divider">
-
-                        <label class="section-label">{{ ui.vibe_label }}</label>
-                        <div class="char-vibe-cards" id="vibe-cards">
-                            {% for v in vibes %}
-                            <div class="char-vibe-card {% if formdata.vibe==v[0] %}selected{% endif %}"
-                                data-vibe="{{v[0]}}" onclick="selectVibe('{{v[0]}}')">
-                                <span>{{v[1]}}</span> <span>{{v[2]}}</span>
-                            </div>
-                            {% endfor %}
+                        <div class="metric">
+                            <span class="metric-label">{{ ui.metric_pace }}</span>
+                            <span class="metric-val">{{ result_data.pace_verbose }}</span>
                         </div>
-                        <input type="hidden" id="vibe" name="vibe" value="{{ formdata.vibe|default('friendly') }}">
-
-                        <hr class="section-divider">
-
-                        <label class="section-label">{{ ui.notes_label }}</label>
-                        <textarea name="extra_notes" placeholder="{{ ui.notes_placeholder }}" style="width:100%;min-height:80px;resize:vertical;" maxlength="1000">{{ formdata.extra_notes|default('') }}</textarea>
-
-                        <hr class="section-divider">
-
-                        <label class="section-label">{{ ui.model_label }}</label>
-                        <select name="model" style="margin-top:5px; width: 250px; padding: 12px 16px; border: 2px solid #e1e5e9; border-radius: 12px; background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%); font-size: 16px; font-weight: 600; color: #1e293b; cursor: pointer; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); outline: none; position: relative;">
-                            {% for model_value, model_label in model_options %}
-                            <option value="{{ model_value }}" {% if formdata.model|default('gpt-4o-mini') == model_value %}selected{% endif %}>{{ model_label }}</option>
-                            {% endfor %}
-                        </select>
+                        {% if result_data.distance %}
+                        <div class="metric">
+                            <span class="metric-label">{{ ui.metric_distance }}</span>
+                            <span class="metric-val">{{ result_data.distance }}</span>
+                        </div>
+                        {% endif %}
+                        <div class="metric">
+                            <span class="metric-label">{{ ui.metric_budget }}</span>
+                            <span class="metric-val">{{ result_data.budget }} ₽</span>
+                        </div>
                     </div>
-                    <button class="btn-main" type="submit" id="submitBtn" {% if loading %}disabled{% endif %}>
-                        {% if loading %}<span id="spinner">⏳</span> {{ ui.submit_loading }}{% else %}{{ ui.submit_idle }}{% endif %}
-                    </button>
+                    <h3 style="margin:26px 0 9px 0;">{{ ui.steps_title }}</h3>
+                    {% if result_data.route_description %}
+                    <div style="margin: 20px 0; padding: 20px; background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%); border-radius: 12px; border: 1px solid #e1e5e9; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); position: relative;">
+                        <div style="position: absolute; top: -10px; left: 20px; background: #1e88e5; color: white; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">{{ ui.route_badge }}</div>
+                        <div style="margin-top: 10px; line-height: 1.7; color: #374151; font-size: 16px; white-space: pre-line;">{{ result_data.route_description|safe }}</div>
+                    </div>
+                    {% endif %}
+                    {% if result_data.error %}
+                    <div style="margin: 20px 0; padding: 16px 18px; background: #fff4f4; color: #9b1c1c; border: 1px solid #f3b3b3; border-radius: 12px;">
+                        {{ result_data.error }}
+                    </div>
+                    {% endif %}
                 </div>
-            </div>
-            <div class="rightcol">
-                <div id="map" style="width:100%;height:800px;border-radius:14px;box-shadow:0 1px 8px #0002;"></div>
+                {% endif %}
             </div>
         </div>
-    </form>
-    {% if generated %}
-    <div class="result-area" id="results">
-        <h2 class="result-h">{{ ui.result_title }}</h2>
-        <div class="result-metrics">
-            <div class="metric">
-                <span class="metric-label">{{ ui.metric_vibe }}</span>
-                <span class="metric-val">{{ result_data.vibe_verbose }}</span>
-            </div>
-            <div class="metric">
-                <span class="metric-label">{{ ui.metric_duration }}</span>
-                <span class="metric-val">{{ result_data.duration_str }}</span>
-            </div>
-            <div class="metric">
-                <span class="metric-label">{{ ui.metric_budget }}</span>
-                <span class="metric-val">{{ result_data.budget }} ₽</span>
-            </div>
-        </div>
-        <h3 style="margin:26px 0 9px 0;">{{ ui.steps_title }}</h3>
-        {% if result_data.route_description %}
-        <div class="route-description" style="margin: 20px 0; padding: 20px; background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%); border-radius: 12px; border: 1px solid #e1e5e9; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); position: relative;">
-            <div style="position: absolute; top: -10px; left: 20px; background: #1e88e5; color: white; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">{{ ui.route_badge }}</div>
-            <div style="margin-top: 10px; line-height: 1.7; color: #374151; font-size: 16px; white-space: pre-line;">{{ result_data.route_description|safe }}</div>
-        </div>
-        {% endif %}
-        {% if result_data.error %}
-        <div style="margin: 20px 0; padding: 16px 18px; background: #fff4f4; color: #9b1c1c; border: 1px solid #f3b3b3; border-radius: 12px;">
-            {{ result_data.error }}
-        </div>
-        {% endif %}
     </div>
-    {% endif %}
     <script id="places-data" type="application/json">{{ places|tojson }}</script>
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.min.js"></script>
@@ -219,10 +339,154 @@
         const UI_TEXT = {{ ui|tojson }};
         const SELECTED_LANG = {{ formdata.lang|default('ru')|tojson }};
         const langSwitcher = document.getElementById('langSwitcher');
+        const mobileLangSwitcher = document.getElementById('mobileLangSwitcher');
+        const mobileSheet = document.getElementById('mobileSheet');
+        const sheetHandle = document.getElementById('sheetHandle');
+        const sheetScroll = document.getElementById('sheetScroll');
+        const mobileViewport = window.matchMedia('(max-width: 640px)');
         const durationSlider = document.getElementById('duration_slider');
         const durationLabel = document.getElementById('durationLabel');
         const durationHoursInput = document.getElementById('duration_hrs');
         const durationMinsInput = document.getElementById('duration_mins');
+        let currentSheetHeight = null;
+
+        function syncViewportHeightVar() {
+            document.documentElement.style.setProperty('--app-height', `${window.innerHeight}px`);
+        }
+
+        function refreshMapSize() {
+            if (!map) {
+                return;
+            }
+            map.invalidateSize();
+            setTimeout(() => map.invalidateSize(), 120);
+            setTimeout(() => map.invalidateSize(), 320);
+        }
+
+        function getSheetSnapHeights() {
+            const viewportHeight = window.innerHeight;
+            return {
+                collapsed: Math.round(viewportHeight * 0.18),
+                mid: Math.round(viewportHeight * 0.48),
+                expanded: Math.round(viewportHeight * 0.86),
+            };
+        }
+
+        function applySheetHeight(height, invalidateMap = true) {
+            if (!mobileSheet || !mobileViewport.matches) {
+                return;
+            }
+
+            const snaps = getSheetSnapHeights();
+            const clamped = Math.max(snaps.collapsed, Math.min(snaps.expanded, height));
+            currentSheetHeight = clamped;
+            mobileSheet.style.height = `${clamped}px`;
+
+            if (invalidateMap) {
+                window.requestAnimationFrame(refreshMapSize);
+            }
+        }
+
+        function snapSheet(position) {
+            if (!mobileSheet || !mobileViewport.matches) {
+                if (mobileSheet) {
+                    mobileSheet.style.removeProperty('height');
+                }
+                currentSheetHeight = null;
+                return;
+            }
+
+            const snaps = getSheetSnapHeights();
+            const targetHeight = snaps[position] || snaps.mid;
+            mobileSheet.dataset.sheetState = position;
+            applySheetHeight(targetHeight);
+        }
+
+        function initMobileSheet() {
+            if (!mobileSheet || !sheetHandle) {
+                return;
+            }
+
+            const state = 'collapsed';
+            snapSheet(state);
+
+            let dragStartY = 0;
+            let dragStartHeight = 0;
+            let dragging = false;
+
+            const onPointerMove = (event) => {
+                if (!dragging) {
+                    return;
+                }
+                const delta = dragStartY - event.clientY;
+                applySheetHeight(dragStartHeight + delta, false);
+            };
+
+            const onPointerUp = () => {
+                if (!dragging) {
+                    return;
+                }
+
+                dragging = false;
+                document.body.style.userSelect = '';
+                window.removeEventListener('pointermove', onPointerMove);
+                window.removeEventListener('pointerup', onPointerUp);
+
+                const snaps = getSheetSnapHeights();
+                const distances = Object.entries(snaps).map(([key, value]) => ({
+                    key,
+                    distance: Math.abs(value - (currentSheetHeight || value)),
+                }));
+                distances.sort((a, b) => a.distance - b.distance);
+                snapSheet(distances[0].key);
+            };
+
+            sheetHandle.addEventListener('pointerdown', (event) => {
+                if (!mobileViewport.matches) {
+                    return;
+                }
+                dragging = true;
+                dragStartY = event.clientY;
+                dragStartHeight = currentSheetHeight || mobileSheet.getBoundingClientRect().height;
+                document.body.style.userSelect = 'none';
+                window.addEventListener('pointermove', onPointerMove);
+                window.addEventListener('pointerup', onPointerUp);
+            });
+
+            if (sheetScroll) {
+                sheetScroll.addEventListener('focusin', () => {
+                    if (mobileViewport.matches) {
+                        snapSheet('expanded');
+                    }
+                });
+            }
+        }
+
+        window.addEventListener('resize', () => {
+            if (mobileViewport.matches) {
+                const state = mobileSheet?.dataset.sheetState || 'collapsed';
+                snapSheet(state);
+            } else if (mobileSheet) {
+                mobileSheet.style.removeProperty('height');
+            }
+            refreshMapSize();
+        });
+
+        syncViewportHeightVar();
+        window.addEventListener('orientationchange', () => {
+            syncViewportHeightVar();
+            setTimeout(refreshMapSize, 120);
+        });
+        window.addEventListener('pageshow', () => {
+            syncViewportHeightVar();
+            setTimeout(refreshMapSize, 120);
+        });
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', () => {
+                syncViewportHeightVar();
+                refreshMapSize();
+            });
+        }
 
         function buildLanguageSwitchUrl(lang) {
             const params = new URLSearchParams();
@@ -240,6 +504,7 @@
                 'map_zoom',
                 'duration_hrs',
                 'duration_mins',
+                'pace',
                 'vibe',
                 'lang',
             ];
@@ -279,6 +544,16 @@
             });
         }
 
+        if (mobileLangSwitcher) {
+            mobileLangSwitcher.addEventListener('change', function () {
+                const langInput = document.getElementById('lang');
+                if (langInput) {
+                    langInput.value = this.value;
+                }
+                window.location.href = buildLanguageSwitchUrl(this.value);
+            });
+        }
+
         function updateDurationLabel(value) {
             const hours = Math.floor(value / 60);
             const mins = value % 60;
@@ -287,23 +562,28 @@
             durationMinsInput.value = mins;
         }
 
-        // Инициализация при загрузке страницы
+        // Initialize controls on page load.
         updateDurationLabel(durationSlider.value);
         function setBudget(v) { budget_slider.value = budgetValInp.value = v; }
+        function selectPace(val) {
+            document.getElementById('pace').value = val;
+            document.querySelectorAll('[data-pace]').forEach(
+                c => { c.classList.remove('selected'); if (c.getAttribute('data-pace') === val) c.classList.add('selected'); });
+        }
         function selectVibe(val) {
             document.getElementById('vibe').value = val;
-            document.querySelectorAll('.char-vibe-card').forEach(
+            document.querySelectorAll('[data-vibe]').forEach(
                 c => { c.classList.remove('selected'); if (c.getAttribute('data-vibe') === val) c.classList.add('selected'); });
         }
         document.getElementById('mainform').addEventListener('submit', function (e) {
-            // Показываем состояние загрузки сразу при нажатии кнопки
+            // Show loading state immediately after submit.
             const submitBtn = document.getElementById('submitBtn');
             if (submitBtn) {
                 submitBtn.disabled = true;
                 submitBtn.innerHTML = `<span id="spinner">⏳</span> ${UI_TEXT.submit_loading}`;
             }
 
-            // Сохраняем текущие центр и зум карты, чтобы после POST она не сбрасывалась на Москву
+            // Preserve the current map viewport across POST.
             if (map) {
                 const c = map.getCenter();
                 const latField = document.getElementById('map_lat');
@@ -314,7 +594,7 @@
                 if (zoomField) zoomField.value = map.getZoom();
             }
 
-            // Заполняем скрытые поля координатами начального местоположения
+            // Persist the resolved start coordinates.
             if (currentLocationCoords) {
                 const latField = document.getElementById('start_lat');
                 const lngField = document.getElementById('start_lng');
@@ -322,7 +602,7 @@
                 if (lngField) lngField.value = currentLocationCoords.lng;
             }
 
-            // Заполняем скрытые поля координатами КОНЕЧНОЙ точки
+            // Persist the resolved end coordinates.
             if (endLocationCoords) {
                 const latField = document.getElementById('end_lat');
                 const lngField = document.getElementById('end_lng');
@@ -877,6 +1157,9 @@
                 drawRouteIfPossible();
             }
             addPlaceMarkersIfGenerated();
+            initMobileSheet();
+            syncViewportHeightVar();
+            refreshMapSize();
         }, 800);
 
         function editRoute() {

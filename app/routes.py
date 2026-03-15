@@ -5,6 +5,7 @@ from app.planner import (
     MODEL_OPTIONS,
     PLACES,
     build_summary,
+    get_paces,
     get_ui_text,
     get_vibes,
     get_end_location_coords,
@@ -58,6 +59,7 @@ def init_app(app):
                 "end_lng",
                 "duration_hrs",
                 "duration_mins",
+                "pace",
                 "budget",
                 "vibe",
                 "extra_notes",
@@ -76,6 +78,7 @@ def init_app(app):
             formdata.setdefault("start_lng", "39.952640447932154")
             formdata.setdefault("end_lat", "43.4047")
             formdata.setdefault("end_lng", "39.9670")
+            formdata.setdefault("pace", "relaxed")
             formdata.setdefault("model", DEFAULT_MODEL)
             formdata.setdefault("map_lat", "43.4085")
             formdata.setdefault("map_lng", "39.9625")
@@ -86,8 +89,13 @@ def init_app(app):
 
         if result_data is not None:
             try:
-                places, description = get_places(formdata)
+                places, description, total_distance_m = get_places(formdata)
                 result_data["route_description"] = description if description != "no-description" else None
+                if total_distance_m is not None:
+                    if total_distance_m >= 1000:
+                        result_data["distance"] = f"{total_distance_m / 1000:.1f} km"
+                    else:
+                        result_data["distance"] = f"{total_distance_m} m"
             except Exception as exc:
                 places = PLACES
                 result_data["route_description"] = None
@@ -101,6 +109,7 @@ def init_app(app):
             ui=get_ui_text(lang),
             languages=LANGUAGES,
             vibes=get_vibes(lang),
+            paces=get_paces(lang),
             model_options=MODEL_OPTIONS,
             result_data=result_data,
             generated=generated,
