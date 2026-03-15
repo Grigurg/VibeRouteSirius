@@ -1,11 +1,11 @@
 import json
+import re
 from pathlib import Path
 
 from loguru import logger
-from openai import OpenAI
-from openai import AuthenticationError
+from openai import AuthenticationError, OpenAI
 
-from app.data_access import EmbSearch, get_points, load_database
+from app.data_access import canonicalize_category_name, normalize_text
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 API_KEY_FILE = ROOT_DIR / "api_key"
@@ -30,23 +30,101 @@ OPENROUTER_MODELS = {
 }
 
 DEFAULT_MODEL = "gpt-4o-mini"
-MAX_PLACE_CANDIDATES = 8
-MAX_PLACE_DESCRIPTION_LENGTH = 220
-PACE_PROFILES = {
-    "relaxed": {
-        "label": "relaxed",
-        "speed_m_per_min": 40,
-        "stop_share": 0.30,
+
+CANONICAL_CATEGORIES = [
+    "park",
+    "cafe",
+    "restaurant",
+    "bar",
+    "nightlife",
+    "entertainment",
+    "promenade",
+    "beach",
+    "viewpoint",
+    "museum",
+    "artwork",
+    "attraction",
+    "sports",
+    "playground",
+    "religious_site",
+]
+
+SEQUENCE_PATTERNS = (
+    re.compile(r"сначала\s+(.+?)(?:,\s*|\s+а\s+потом\s+|\s+потом\s+)(.+?)(?:[.!?]|$)", re.IGNORECASE),
+    re.compile(r"first\s+(.+?)(?:,\s*|\s+and then\s+|\s+then\s+)(.+?)(?:[.!?]|$)", re.IGNORECASE),
+)
+
+AVOID_PATTERNS = (
+    re.compile(r"без\s+([^.,;!?]+)", re.IGNORECASE),
+    re.compile(r"avoid\s+([^.,;!?]+)", re.IGNORECASE),
+    re.compile(r"no\s+([^.,;!?]+)", re.IGNORECASE),
+)
+
+PREFERENCE_KEYWORDS = {
+    "quiet": ["quiet", "calm", "тихо", "спокой", "без шума"],
+    "scenic": ["scenic", "view", "вид", "панорам", "красив"],
+    "romantic": ["romantic", "романт", "свидание"],
+    "slow": ["slow", "unhurried", "медлен", "не спеша", "нетороп"],
+    "cozy": ["cozy", "уют", "лампов"],
+    "family": ["family", "семейн", "с детьми", "children"],
+    "active": ["active", "sport", "актив", "энерг"],
+    "cultural": ["cultural", "culture", "культур", "музей"],
+}
+
+CATEGORY_SYNONYMS = {
+    "park": ["park", "парк", "garden", "сквер"],
+    "cafe": ["cafe", "coffee", "кофе", "кафе", "кофейня"],
+    "restaurant": ["restaurant", "еда", "food", "ресторан", "fast food", "fast_food"],
+    "bar": ["bar", "бар", "pub", "кальян", "hookah"],
+    "nightlife": ["nightclub", "club", "ночной клуб", "ночная жизнь"],
+    "entertainment": ["entertainment", "развлеч", "cinema", "quest", "escape game"],
+    "promenade": ["promenade", "embankment", "набереж", "променад", "seafront"],
+    "beach": ["beach", "пляж"],
+    "viewpoint": ["viewpoint", "смотров", "обзор"],
+    "museum": ["museum", "музей"],
+    "artwork": ["artwork", "арт", "скульптур", "памятник"],
+    "attraction": ["attraction", "достопримеч", "theme park", "theme_park"],
+    "sports": ["sports", "sport", "спорт", "stadium"],
+    "playground": ["playground", "детская площадка", "children area"],
+    "religious_site": ["church", "temple", "церковь", "храм"],
+}
+
+REASON_TRANSLATIONS = {
+    "respects the requested stop order": {
+        "ru": "сохранять запрошенный порядок остановок",
+        "en": "respect the requested stop order",
     },
-    "normal": {
-        "label": "normal",
-        "speed_m_per_min": 48,
-        "stop_share": 0.22,
+    "balances different types of places": {
+        "ru": "сбалансировать разные типы мест",
+        "en": "balance different types of places",
     },
-    "active": {
-        "label": "active",
-        "speed_m_per_min": 58,
-        "stop_share": 0.15,
+    "keeps the route coherent and close to the direct path": {
+        "ru": "сохранять логичный маршрут рядом с естественным путём",
+        "en": "keep the route coherent and close to the direct path",
+    },
+    "avoids major detours": {
+        "ru": "избегать больших крюков",
+        "en": "avoid major detours",
+    },
+    "stays within the budget": {
+        "ru": "уложиться в бюджет",
+        "en": "stay within the budget",
+    },
+    "fills the requested walk duration reasonably well": {
+        "ru": "хорошо заполнить запрошенную длительность прогулки",
+        "en": "fill the requested walk duration reasonably well",
+    },
+    "provides the best trade-off between relevance and efficiency": {
+        "ru": "сбалансировать релевантность и эффективность",
+        "en": "provide the best trade-off between relevance and efficiency",
+    },
+    "keeps a simple direct walk between the requested endpoints": {
+        "ru": "оставить простую прямую прогулку между выбранными точками",
+        "en": "keep a simple direct walk between the requested endpoints",
+    },
+    "avoids unnecessary spending": {
+        "ru": "избежать лишних трат",
+        "en": "avoid unnecessary spending",
     },
 }
 
@@ -62,393 +140,382 @@ def load_openrouter_api_key():
     return value
 
 
+def empty_parse_result():
+    return {
+        "hard_constraints": {
+            "must_visit_in_order": [],
+            "avoid_categories": [],
+            "required_categories": [],
+            "food_limit": None,
+            "max_intermediate_stops": None,
+            "max_total_budget_rub": None,
+            "max_total_duration_min": None,
+            "max_total_distance_m": None,
+        },
+        "soft_preferences": {
+            "optional_preferences": [],
+            "vibe": [],
+            "preferred_categories": [],
+        },
+        "notes_summary": "",
+    }
+
+
+def normalize_constraint_term(value):
+    normalized = normalize_text(value)
+    if not normalized:
+        return ""
+    canonical = canonicalize_category_name(normalized)
+    return canonical or normalized
+
+
+def extract_json_object(text):
+    if not text:
+        return None
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    try:
+        return json.loads(text[start : end + 1])
+    except json.JSONDecodeError:
+        return None
+
+
+def detect_categories(text):
+    normalized = normalize_text(text)
+    if not normalized:
+        return []
+
+    detected = []
+    for category, synonyms in CATEGORY_SYNONYMS.items():
+        if any(synonym in normalized for synonym in synonyms):
+            detected.append(category)
+    return detected
+
+
+def detect_preferences(text):
+    normalized = normalize_text(text)
+    if not normalized:
+        return []
+
+    matches = []
+    for preference, keywords in PREFERENCE_KEYWORDS.items():
+        if any(keyword in normalized for keyword in keywords):
+            matches.append(preference)
+    return matches
+
+
+def localize_reason(reason, lang):
+    translations = REASON_TRANSLATIONS.get(reason)
+    if translations:
+        return translations.get(lang, reason)
+    return reason
+
+
 class OpenRouterChat:
     def __init__(self):
-        self.start_message = "You are an AI assistant that can build optimal routes based on the user's preferences."
+        self.start_message = "You are an AI assistant that extracts structured route constraints and narrates routes."
         api_key = load_openrouter_api_key()
-        if not api_key:
-            raise RuntimeError(
-                "OpenRouter API key is not configured in the api_key file."
+        self.available = bool(api_key)
+        self.client = None
+        if self.available:
+            self.client = OpenAI(
+                api_key=api_key,
+                base_url="https://openrouter.ai/api/v1",
             )
-        self.client = OpenAI(
-            api_key=api_key,
-            base_url="https://openrouter.ai/api/v1",
-        )
 
-    def ask(self, messages, query, tools, model_name=DEFAULT_MODEL):
-        if len(query) >= 1:
-            messages.append({"role": "user", "content": query})
+    def complete(self, messages, model_name=DEFAULT_MODEL, temperature=0.2, max_tokens=1800):
+        if not self.available or self.client is None:
+            raise RuntimeError("OpenRouter API key is not configured.")
 
         selected_model = OPENROUTER_MODELS.get(model_name, OPENROUTER_MODELS[DEFAULT_MODEL])
-
         try:
             response = self.client.chat.completions.create(
                 model=selected_model["openrouter_id"],
                 messages=messages,
-                temperature=0.3,
-                tools=tools,
-                tool_choice="required",
-                max_tokens=2000,
+                temperature=temperature,
+                max_tokens=max_tokens,
             )
         except AuthenticationError as exc:
             raise RuntimeError(
                 "OpenRouter authentication failed. Check OPENROUTER_API_KEY or the api_key file."
             ) from exc
 
-        answer = response.choices[0].message
-        messages.append(answer)
-        return answer.tool_calls or []
-
-    def clear_history(self, messages):
-        messages = [{"role": "system", "content": self.start_message}]
+        return response.choices[0].message.content or ""
 
 
 class LLMAgent:
     def __init__(self):
         self.model = OpenRouterChat()
-        self.tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "get_places",
-                    "parameters": {
-                        "type": "object",
-                        "description": "This function takes a query string and returns up to 9 locations that best match the request.",
-                        "properties": {"query": {"type": "string"}},
-                        "required": ["query"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "message",
-                    "parameters": {
-                        "type": "object",
-                        "description": "Pass route points to this function in the format: address, point id. Pass the points in descending order of distance to the final point.",
-                        "properties": {
-                            "text": {
-                                "type": "string",
-                                "description": "Route description",
-                            },
-                            "points": {
-                                "type": "array",
-                                "description": "List of route point ids",
-                                "items": {"type": "integer"},
-                            },
-                        },
-                        "required": ["text", "points"],
-                    },
-                },
-            },
+
+    def heuristic_parse_user_request(self, extra_notes):
+        result = empty_parse_result()
+        text = normalize_text(extra_notes)
+        if not text:
+            return result
+
+        result["notes_summary"] = extra_notes.strip()
+
+        for pattern in SEQUENCE_PATTERNS:
+            match = pattern.search(extra_notes)
+            if not match:
+                continue
+            ordered_terms = []
+            for chunk in match.groups():
+                categories = detect_categories(chunk)
+                if categories:
+                    ordered_terms.append(categories[0])
+                else:
+                    normalized = normalize_constraint_term(chunk)
+                    if normalized:
+                        ordered_terms.append(normalized)
+            if ordered_terms:
+                result["hard_constraints"]["must_visit_in_order"] = ordered_terms
+                break
+
+        avoid_categories = []
+        for pattern in AVOID_PATTERNS:
+            for match in pattern.findall(extra_notes):
+                detected = detect_categories(match)
+                if detected:
+                    avoid_categories.extend(detected)
+                else:
+                    normalized = normalize_constraint_term(match)
+                    if normalized:
+                        avoid_categories.append(normalized)
+        result["hard_constraints"]["avoid_categories"] = list(dict.fromkeys(avoid_categories))
+
+        categories = detect_categories(extra_notes)
+        if categories:
+            preferred_categories = [
+                category
+                for category in categories
+                if category not in result["hard_constraints"]["must_visit_in_order"]
+                and category not in result["hard_constraints"]["avoid_categories"]
+            ]
+            result["soft_preferences"]["preferred_categories"] = list(dict.fromkeys(preferred_categories))
+
+        preferences = detect_preferences(extra_notes)
+        if preferences:
+            result["soft_preferences"]["optional_preferences"] = preferences
+            result["soft_preferences"]["vibe"] = [
+                item for item in preferences if item in {"romantic", "cozy", "family", "active", "cultural", "slow"}
+            ]
+
+        if "не больше одного кафе" in text or "one cafe" in text or "at most one cafe" in text:
+            result["hard_constraints"]["food_limit"] = 1
+        elif "без кафе" in text or "no cafe" in text:
+            result["hard_constraints"]["food_limit"] = 0
+
+        max_stops_match = re.search(r"(?:максимум|не больше|at most|max)\s+(\d+)\s+(?:останов|stops?)", text)
+        if max_stops_match:
+            result["hard_constraints"]["max_intermediate_stops"] = int(max_stops_match.group(1))
+
+        return result
+
+    def parse_user_request(
+        self,
+        extra_notes,
+        vibe,
+        total_minutes,
+        pace,
+        budget_rub,
+        lang="ru",
+        model_name=DEFAULT_MODEL,
+    ):
+        base_result = self.heuristic_parse_user_request(extra_notes)
+        if not extra_notes or not extra_notes.strip():
+            return base_result
+
+        if not self.model.available:
+            return base_result
+
+        system_prompt = (
+            "You extract route planning constraints from user text. "
+            "Return JSON only. Distinguish hard constraints from soft preferences carefully. "
+            "If the user explicitly specifies an order like 'first park, then cafe', put it into hard_constraints.must_visit_in_order. "
+            "If the user phrases something softly like 'would be nice to grab coffee', keep it in soft_preferences.preferred_categories or optional_preferences. "
+            "Use canonical categories when possible. Allowed canonical categories: "
+            + ", ".join(CANONICAL_CATEGORIES)
+            + ". "
+            "If the user mentions a place type outside that list, keep it as a lowercase keyword."
+        )
+        user_prompt = (
+            "Parse the following route request into JSON with exactly these keys:\n"
+            "{\n"
+            '  "hard_constraints": {\n'
+            '    "must_visit_in_order": [],\n'
+            '    "avoid_categories": [],\n'
+            '    "required_categories": [],\n'
+            '    "food_limit": null,\n'
+            '    "max_intermediate_stops": null,\n'
+            '    "max_total_budget_rub": null,\n'
+            '    "max_total_duration_min": null,\n'
+            '    "max_total_distance_m": null\n'
+            "  },\n"
+            '  "soft_preferences": {\n'
+            '    "optional_preferences": [],\n'
+            '    "vibe": [],\n'
+            '    "preferred_categories": []\n'
+            "  },\n"
+            '  "notes_summary": ""\n'
+            "}\n\n"
+            f"Explicit form context:\n"
+            f"- vibe: {vibe}\n"
+            f"- duration_minutes: {total_minutes}\n"
+            f"- pace: {pace}\n"
+            f"- budget_rub: {budget_rub}\n"
+            f"- output_language: {'Russian' if lang == 'ru' else 'English'}\n\n"
+            f"User text:\n{extra_notes.strip()}"
+        )
+
+        try:
+            response = self.model.complete(
+                [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                model_name=model_name,
+                temperature=0.0,
+                max_tokens=1200,
+            )
+            parsed = extract_json_object(response)
+            if not isinstance(parsed, dict):
+                logger.warning("Failed to parse LLM request JSON, using heuristic parse")
+                return base_result
+
+            merged = empty_parse_result()
+            merged["notes_summary"] = parsed.get("notes_summary") or base_result["notes_summary"]
+
+            for key in merged["hard_constraints"]:
+                value = parsed.get("hard_constraints", {}).get(key)
+                merged["hard_constraints"][key] = value if value not in ("", []) else merged["hard_constraints"][key]
+            for key in merged["soft_preferences"]:
+                value = parsed.get("soft_preferences", {}).get(key)
+                merged["soft_preferences"][key] = value if value not in ("", []) else merged["soft_preferences"][key]
+
+            for key, value in base_result["hard_constraints"].items():
+                if merged["hard_constraints"].get(key) in (None, [], ""):
+                    merged["hard_constraints"][key] = value
+            for key, value in base_result["soft_preferences"].items():
+                if merged["soft_preferences"].get(key) in (None, [], ""):
+                    merged["soft_preferences"][key] = value
+
+            for field_name in ("must_visit_in_order", "avoid_categories", "required_categories"):
+                merged["hard_constraints"][field_name] = [
+                    normalize_constraint_term(item)
+                    for item in merged["hard_constraints"].get(field_name, [])
+                    if normalize_constraint_term(item)
+                ]
+            for field_name in ("optional_preferences", "vibe", "preferred_categories"):
+                merged["soft_preferences"][field_name] = [
+                    normalize_constraint_term(item)
+                    for item in merged["soft_preferences"].get(field_name, [])
+                    if normalize_constraint_term(item)
+                ]
+
+            return merged
+        except Exception as exc:
+            logger.warning("LLM parse failed, using heuristic parse: {}", exc)
+            return base_result
+
+    def build_fallback_narration(self, request, route_plan):
+        stop_names = [point.name or point.street for point in route_plan.stop_points]
+        cafe_names = [
+            point.name or point.street
+            for point in route_plan.stop_points
+            if "cafe" in point.categories or "restaurant" in point.categories
         ]
-        self.db = load_database()
-        self.embs = EmbSearch(self.db, 3)
 
-    def shorten_text(self, text, limit):
-        if text is None:
-            return ""
-        if len(text) <= limit:
-            return text
-        return text[: limit - 3].rstrip() + "..."
-
-    def wants_cafe_stop(self, extra_notes):
-        normalized = (extra_notes or "").lower()
-        keywords = ("coffee", "cafe", "cafes", "espresso", "latte", "кофе", "кафе", "кофейня")
-        return any(keyword in normalized for keyword in keywords)
-
-    def get_pace_profile(self, pace):
-        return PACE_PROFILES.get(pace, PACE_PROFILES["relaxed"])
-
-    def build_distance_budget(self, start_point, end_point, total_minutes, pace):
-        profile = self.get_pace_profile(pace)
-        walking_minutes = max(total_minutes * (1 - profile["stop_share"]), 30)
-        computed_budget = int(walking_minutes * profile["speed_m_per_min"])
-        direct_distance = start_point.dist_between_points(end_point)
-        min_required_budget = int(direct_distance * 1.12)
-        return {
-            "pace_label": profile["label"],
-            "speed_m_per_min": profile["speed_m_per_min"],
-            "walking_minutes": int(round(walking_minutes)),
-            "distance_budget_m": max(computed_budget, min_required_budget),
-            "direct_distance_m": direct_distance,
-        }
-
-    def calculate_route_distance(self, start_point, point_ids, end_point):
-        route_points = [start_point]
-        for point_id in point_ids:
-            if not isinstance(point_id, int) or not (0 <= point_id < len(self.db)):
-                return None
-            route_points.append(self.db[point_id])
-        route_points.append(end_point)
-
-        total_distance = 0
-        for index in range(len(route_points) - 1):
-            total_distance += route_points[index].dist_between_points(route_points[index + 1])
-        return total_distance
-
-    def normalize_point_ids(self, point_ids, end_point):
-        normalized_ids = []
-        seen_ids = set()
-
-        for point_id in point_ids:
-            if not isinstance(point_id, int) or not (0 <= point_id < len(self.db)):
-                continue
-            if point_id in seen_ids:
-                continue
-            normalized_ids.append(point_id)
-            seen_ids.add(point_id)
-
-        normalized_ids.sort(
-            key=lambda point_id: self.db[point_id].dist_between_points(end_point),
-            reverse=True,
-        )
-        return normalized_ids
-
-    def build_fallback_query(self, walk_type, extra_notes):
-        route_queries = {
-            "friendly": "promenade, viewpoint, park, cafe, public space",
-            "romantic": "seafront, scenic viewpoint, quiet park, cozy cafe",
-            "family": "family-friendly park, playground, promenade, cafe",
-            "active": "promenade, sports area, park, viewpoint",
-            "cozy": "quiet promenade, cafe, park, scenic place",
-            "cultural": "museum, art object, landmark, promenade",
-        }
-        base_query = route_queries.get(walk_type, route_queries["friendly"])
-        if extra_notes.strip():
-            return f"{base_query}. User preferences: {extra_notes.strip()}"
-        return base_query
-
-    def build_fallback_route(self, start_point, end_point, walk_type, extra_notes, constraints, lang):
-        query = self.build_fallback_query(walk_type, extra_notes)
-        candidates, _, _ = get_points(self.db, self.embs, start_point, end_point, query)
-        direct_distance = constraints["direct_distance_m"]
-        distance_budget = constraints["distance_budget_m"]
-        selected_points = []
-        selected_ids = []
-        used_ids = set()
-        require_cafe = self.wants_cafe_stop(extra_notes)
-
-        if require_cafe:
-            cafe_candidates, _, _ = get_points(
-                self.db,
-                self.embs,
-                start_point,
-                end_point,
-                "cafe, coffee shop, cafe with takeaway coffee",
-            )
-            for candidate in cafe_candidates:
-                if candidate.id in used_ids:
-                    continue
-                tentative_ids = [candidate.id]
-                total_distance = self.calculate_route_distance(start_point, tentative_ids, end_point)
-                if total_distance is None or total_distance > distance_budget:
-                    continue
-                selected_points.append(candidate)
-                selected_ids.append(candidate.id)
-                used_ids.add(candidate.id)
-                break
-
-        for candidate in candidates:
-            if candidate.id in used_ids:
-                continue
-            detour_distance = (
-                start_point.dist_between_points(candidate)
-                + candidate.dist_between_points(end_point)
-                - direct_distance
-            )
-            if detour_distance > max(distance_budget - direct_distance, 0):
-                continue
-
-            tentative_ids = selected_ids + [candidate.id]
-            total_distance = self.calculate_route_distance(start_point, tentative_ids, end_point)
-            if total_distance is None or total_distance > distance_budget:
-                continue
-
-            selected_points.append(candidate)
-            selected_ids.append(candidate.id)
-            used_ids.add(candidate.id)
-            if len(selected_ids) >= 3:
-                break
-
-        selected_ids = self.normalize_point_ids(selected_ids, end_point)
-        ordered_points = [self.db[point_id] for point_id in selected_ids]
-        description = self.build_fallback_description(
-            start_point,
-            end_point,
-            ordered_points,
-            constraints,
-            lang,
-        )
-        return description, selected_ids
-
-    def build_fallback_description(self, start_point, end_point, points, constraints, lang):
-        if lang == "ru":
-            if points:
-                point_names = ", ".join(point.name or point.street for point in points)
-                return (
-                    f"Маршрут начинается в {start_point.street} и ведёт к {end_point.street} "
-                    f"через близкие и удобные точки: {point_names}. "
-                    f"Маршрут рассчитан на спокойный темп и общую пешую дистанцию до {constraints['distance_budget_m']} м."
+        if request.lang == "ru":
+            if stop_names:
+                description = (
+                    f"Маршрут начинается в {request.start.street} и ведёт к {request.end.street} через "
+                    + ", ".join(stop_names)
+                    + ". "
                 )
-            return (
-                f"Маршрут проходит от {start_point.street} до {end_point.street} без промежуточных остановок, "
-                f"чтобы сохранить спокойный темп и уложиться в пешую дистанцию до {constraints['distance_budget_m']} м."
-            )
-
-        if points:
-            point_names = ", ".join(point.name or point.street for point in points)
-            return (
-                f"The route starts at {start_point.street} and finishes at {end_point.street}, "
-                f"passing through nearby convenient stops: {point_names}. "
-                f"It is tuned for a relaxed walking pace and a total walking distance of up to {constraints['distance_budget_m']} meters."
-            )
-        return (
-            f"The route goes from {start_point.street} to {end_point.street} without intermediate stops "
-            f"to keep a relaxed pace and stay within a walking distance of up to {constraints['distance_budget_m']} meters."
-        )
-
-    def get_places(self, query, a, b):
-        res_points, dists_to_a, dists_to_b = get_points(self.db, self.embs, a, b, query)
-        res_points = res_points[:MAX_PLACE_CANDIDATES]
-        dists_to_a = dists_to_a[:MAX_PLACE_CANDIDATES]
-        dists_to_b = dists_to_b[:MAX_PLACE_CANDIDATES]
-        ans = ""
-        for index, point in enumerate(res_points):
-            short_desc = self.shorten_text(point.desc, MAX_PLACE_DESCRIPTION_LENGTH)
-            ans += (
-                "id: "
-                + str(point.id)
-                + ", address: "
-                + point.street
-                + ", distance to the start point in meters: "
-                + str(dists_to_a[index])
-                + ", distance to the end point in meters: "
-                + str(dists_to_b[index])
-                + ", description: "
-                + short_desc
-                + "\n"
-            )
-        return ans
-
-    def message(self, text, points):
-        return text, points
-
-    def answer_model(self, messages, desc_ans, ans_id, a, b, prompt, model_name=DEFAULT_MODEL):
-        tool_calls = self.model.ask(messages, prompt, self.tools, model_name)
-        tool_results = []
-
-        for tool_call in tool_calls:
-            name = tool_call.function.name
-            args = json.loads(tool_call.function.arguments)
-
-            if name == "get_places":
-                result = self.get_places(args["query"], a, b)
-                logger.info("get_places returned {} candidates", result.count("\n"))
-            elif name == "message":
-                desc = args["text"]
-                points = args["points"]
-                result = self.message(desc, points)
-                desc_ans, ans_id = result
             else:
-                result = None
+                description = (
+                    f"Маршрут проходит напрямую от {request.start.street} до {request.end.street}. "
+                )
 
-            tool_results.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": json.dumps(result, ensure_ascii=False),
-                }
+            if route_plan.route_reasons:
+                localized = [localize_reason(reason, "ru") for reason in route_plan.route_reasons]
+                description += "Он подобран так, чтобы " + "; ".join(localized) + ". "
+            if cafe_names:
+                description += "По пути есть остановка с кофе или едой: " + ", ".join(cafe_names) + ". "
+            return description.strip()
+
+        if stop_names:
+            description = (
+                f"The route starts at {request.start.street} and finishes at {request.end.street}, passing through "
+                + ", ".join(stop_names)
+                + ". "
             )
+        else:
+            description = f"The route goes directly from {request.start.street} to {request.end.street}. "
 
-        return tool_results, desc_ans, ans_id
+        if route_plan.route_reasons:
+            localized = [localize_reason(reason, "en") for reason in route_plan.route_reasons]
+            description += "It was selected to " + "; ".join(localized) + ". "
+        if cafe_names:
+            description += "Food or coffee stops on the route: " + ", ".join(cafe_names) + ". "
+        return description.strip()
 
-    def get_answer(self, a, b, w_type, time, pace, budget, extra_notes, model_name=DEFAULT_MODEL, lang="ru"):
-        constraints = self.build_distance_budget(a, b, time, pace)
-        dist = constraints["direct_distance_m"]
-        route_types = {
-            "friendly": "friendly walk",
-            "romantic": "romantic walk",
-            "family": "family walk",
-            "active": "active walk",
-            "cozy": "cozy walk",
-            "cultural": "cultural walk",
+    def narrate_route(self, request, route_plan, model_name=DEFAULT_MODEL):
+        payload = {
+            "language": request.lang,
+            "start": {
+                "name": request.start.name or request.start.street,
+                "address": request.start.street,
+            },
+            "finish": {
+                "name": request.end.name or request.end.street,
+                "address": request.end.street,
+            },
+            "ordered_stops": [
+                {
+                    "name": point.name or point.street,
+                    "address": point.street,
+                    "categories": list(point.categories),
+                    "description": point.desc,
+                    "why_selected": route_plan.stop_reasons.get(point.id, []),
+                }
+                for point in route_plan.stop_points
+            ],
+            "route_reasons": route_plan.route_reasons,
+            "total_distance_m": route_plan.total_distance_m,
+            "estimated_duration_min": route_plan.estimated_duration_min,
         }
-        output_language = "Russian" if lang == "ru" else "English"
-        extra_notes_text = (
-            f"Additional user preferences: {extra_notes}."
-            if extra_notes.strip()
-            else ""
+
+        if not self.model.available:
+            return self.build_fallback_narration(request, route_plan)
+
+        system_prompt = (
+            "You narrate pedestrian routes. You may only describe the provided route. "
+            "Do not add, remove, replace, or reorder stops. "
+            "Do not invent any extra locations. "
+            "Briefly explain why the route fits the request and mention key stops, including cafes if present."
+        )
+        user_prompt = (
+            "Narrate this exact route in "
+            + ("Russian" if request.lang == "ru" else "English")
+            + ". Keep place names and addresses in their original language when needed.\n\n"
+            + json.dumps(payload, ensure_ascii=False, indent=2)
         )
 
-        system_prompt = f"You are planning a pedestrian route in Sirius, Russia. \
-Build a route for a \"{route_types.get(w_type, 'friendly walk')}\" that starts at {a.street} and ends at {b.street}. \
-The route should take about {time} minutes. The direct distance between {a.street} and {b.street} is {dist} meters. \
-This is a {constraints['pace_label']} leisure walk, not fast transit walking. \
-Assume an effective walking speed of about {constraints['speed_m_per_min']} meters per minute, with time reserved for short stops and browsing. \
-The estimated walking time budget is about {constraints['walking_minutes']} minutes. The maximum total walking distance for the full route is {constraints['distance_budget_m']} meters, including all intermediate stops. Do not exceed this limit. \
-Budget: {budget} RUB per person. {extra_notes_text} The route must contain at most 5 intermediate stops and should be interesting and relevant for the user request. \
-Include either one cafe or restaurant, or none at all, unless the user explicitly asks for more. \
-All stops must be unique, and no intermediate stop may be the same as the start or end point. \
-Use the get_places tool to search for suitable locations. Pass a query describing the type of places you need. \
-The tool returns addresses, short descriptions, ids, and distances to the start and end points in meters. \
-You must use those distances to choose an efficient order. Prefer nearby good options over far away options. \
-Prefer dense clusters of places near the direct path instead of stretching the route just to fill time. \
-The final route must not be longer than the user requested, and should not be much shorter either. \
-When you are ready, call the message tool with a route description and the array of selected point ids. \
-Make only one tool call per assistant turn. Use no more than 5 tool calls before the final message. \
-Do not include the start or end point ids in the final route. Minimize total walking distance while still making the route interesting. \
-If the route includes a cafe, mention its name in the route description. \
-Return the final route description in {output_language}. Keep place names and addresses in their original form when needed."
-
-        desc_ans = "no-description"
-        ans_id = []
-        prompt = system_prompt
-        messages = [{"role": "system", "content": self.model.start_message}]
-        cnt = 0
-
-        while cnt < 10:
-            cnt += 1
-            tool_results, desc_ans, ans_id = self.answer_model(
-                messages, desc_ans, ans_id, a, b, prompt, model_name
+        try:
+            response = self.model.complete(
+                [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                model_name=model_name,
+                temperature=0.3,
+                max_tokens=900,
             )
-            messages.extend(tool_results)
-            if ans_id:
-                ans_id = self.normalize_point_ids(ans_id, b)
-                total_distance = self.calculate_route_distance(a, ans_id, b)
-                if total_distance is not None and total_distance <= constraints["distance_budget_m"]:
-                    break
-
-                logger.warning(
-                    "Rejected route: total distance {} exceeds budget {}",
-                    total_distance,
-                    constraints["distance_budget_m"],
-                )
-                ans_id = []
-                desc_ans = "no-description"
-                exceeded_distance = (
-                    f"{total_distance} meters"
-                    if total_distance is not None
-                    else "an invalid distance"
-                )
-                prompt = (
-                    f"The previous route was invalid because its total walking distance was {exceeded_distance}, "
-                    f"but the hard limit is {constraints['distance_budget_m']} meters. "
-                    "Try again with fewer or closer stops, staying near the direct path."
-                )
-                continue
-
-            prompt = ""
-
-        self.model.clear_history(messages)
-        if not ans_id or desc_ans == "no-description":
-            logger.warning("Falling back to deterministic route generation")
-            desc_ans, ans_id = self.build_fallback_route(
-                a,
-                b,
-                w_type,
-                extra_notes,
-                constraints,
-                lang,
-            )
-        return desc_ans, list(ans_id)
+            return response.strip() or self.build_fallback_narration(request, route_plan)
+        except Exception as exc:
+            logger.warning("LLM narration failed, using deterministic text: {}", exc)
+            return self.build_fallback_narration(request, route_plan)

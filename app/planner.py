@@ -1,9 +1,9 @@
-import random
 from functools import lru_cache
 
 from app.data_access import load_database
 from app.llm import DEFAULT_MODEL, LLMAgent, OPENROUTER_MODELS
 from app.models import Object
+from app.route_engine import DeterministicRoutePlanner
 
 LANGUAGES = {
     "ru": "Русский",
@@ -192,6 +192,11 @@ def get_database():
     return load_database()
 
 
+@lru_cache(maxsize=1)
+def get_route_engine():
+    return DeterministicRoutePlanner(get_database())
+
+
 def parse_form(req_form):
     lang = normalize_language(req_form.get("lang", "ru"))
     selected_model = normalize_model(req_form.get("model", DEFAULT_MODEL))
@@ -241,13 +246,22 @@ def get_end_location_coords(req_form):
 
 def get_places(formdata):
     global PLACES
-    database = get_database()
     agent = get_agent()
+    route_engine = get_route_engine()
     start_object = Object(float(formdata["start_lng"]), float(formdata["start_lat"]), formdata["start_addr"])
     end_object = Object(float(formdata["end_lng"]), float(formdata["end_lat"]), formdata["end_addr"])
     time_minutes = formdata["duration_hrs"] * 60 + formdata["duration_mins"]
 
-    description, indices = agent.get_answer(
+    parsed_request = agent.parse_user_request(
+        formdata["extra_notes"],
+        formdata["vibe"],
+        time_minutes,
+        formdata["pace"],
+        formdata["budget"],
+        formdata.get("lang", "ru"),
+        formdata["model"],
+    )
+    planning_request = route_engine.build_request(
         start_object,
         end_object,
         formdata["vibe"],
@@ -255,23 +269,27 @@ def get_places(formdata):
         formdata["pace"],
         formdata["budget"],
         formdata["extra_notes"],
-        formdata["model"],
         formdata.get("lang", "ru"),
+        formdata["model"],
+        parsed_request,
     )
-    total_distance_m = agent.calculate_route_distance(start_object, indices, end_object)
+    route_plan = route_engine.plan(planning_request)
+    description = agent.narrate_route(planning_request, route_plan, formdata["model"])
 
     PLACES.clear()
-    for index in indices:
-        if 0 <= index < len(database):
-            point = database[index]
-            PLACES.append(
-                {
-                    "name": point.name,
-                    "amenity": point.amenity,
-                    "coordinates": [point.x, point.y],
-                }
-            )
-    return PLACES, description, total_distance_m
+    for point in route_plan.stop_points:
+        PLACES.append(
+            {
+                "name": point.name,
+                "amenity": point.amenity or point.primary_category,
+                "coordinates": [point.x, point.y],
+                "lat": point.y,
+                "lng": point.x,
+                "desc": point.desc,
+                "budget": f"~{point.estimated_cost_rub} ₽" if point.estimated_cost_rub else "",
+            }
+        )
+    return PLACES, description, planning_request, route_plan
 
 
 def get_vibe_verbose(vibe):
@@ -282,66 +300,64 @@ def get_pace_verbose(pace):
     return PACE_LABELS.get(pace, PACE_LABELS["relaxed"])
 
 
-def demo_route_steps(formdata):
-    points = []
-    if formdata.get("start_addr"):
-        points.append(formdata["start_addr"])
-    if formdata.get("end_addr"):
-        points.append(formdata["end_addr"])
+def shorten_text(text, limit=180):
+    if not text:
+        return ""
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3].rstrip() + "..."
 
-    used = []
+
+def build_route_steps(formdata, planning_request, route_plan):
     steps = []
-    vibe_data = get_vibe_verbose(formdata.get("vibe"))
-    vibe_verbose = vibe_data[normalize_language(formdata.get("lang", "ru"))]
+    lang = normalize_language(formdata.get("lang", "ru"))
+    ordered_points = [planning_request.start] + route_plan.stop_points + [planning_request.end]
 
-    for index, point_name in enumerate(points):
-        if PLACES:
-            available = [place for place in PLACES if place.get("name") not in used] or PLACES
-            place = random.choice(available)
-            title = place.get("name", get_ui_text(formdata.get("lang", "ru"))["place_fallback"])
-            desc = place.get("desc", "")
-            budget = place.get("budget", "")
-            img = place.get("img", "https://placehold.co/300x150?text=Place")
-            lat = place.get("lat")
-            lng = place.get("lng")
-            if lat is not None and lng is not None:
-                map_link = f"https://yandex.ru/maps/?ll={lng},{lat}&z=16"
-            else:
-                map_link = f"https://yandex.ru/maps/?text={point_name}" if point_name else "#"
+    for index, point in enumerate(ordered_points):
+        if index == 0:
+            desc = "Старт маршрута." if lang == "ru" else "Route start."
+        elif index == len(ordered_points) - 1:
+            desc = "Финиш маршрута." if lang == "ru" else "Route destination."
         else:
-            title = ""
-            desc = ""
-            budget = ""
-            img = ""
-            map_link = f"https://yandex.ru/maps/?text={point_name}" if point_name else "#"
+            reasons = route_plan.stop_reasons.get(point.id, [])
+            reason_text = "; ".join(reasons)
+            if lang == "ru":
+                desc = shorten_text(point.desc)
+                if reason_text:
+                    desc += f" Почему выбрано: {reason_text}."
+            else:
+                desc = shorten_text(point.desc)
+                if reason_text:
+                    desc += f" Why it was selected: {reason_text}."
 
-        used.append(title)
-        if "%vibe%" in desc and vibe_verbose:
-            desc = desc.replace("%vibe%", vibe_verbose)
+        budget = f"~{point.estimated_cost_rub} ₽" if point.estimated_cost_rub else ""
+        map_link = f"https://yandex.ru/maps/?ll={point.x},{point.y}&z=16"
+        segment = ""
+        if index < len(ordered_points) - 1:
+            next_point = ordered_points[index + 1]
+            leg_distance_m = point.dist_between_points(next_point)
+            leg_minutes = round(leg_distance_m / max(planning_request.speed_m_per_min, 1))
+            if lang == "ru":
+                segment = f"До следующей точки: {leg_minutes} минут пешком ({leg_distance_m / 1000:.1f} км)"
+            else:
+                segment = f"To the next stop: {leg_minutes} minutes on foot ({leg_distance_m / 1000:.1f} km)"
 
         steps.append(
             {
-                "name": point_name if point_name.strip() else title,
+                "name": point.name or point.street,
                 "desc": desc,
                 "budget": budget,
-                "img": img,
+                "img": "",
                 "map_link": map_link,
-                "segment": (
-                    (
-                        f"Время в пути до следующей точки: {15 + 5 * index} минут пешком ({1.2 + 0.3 * index:.1f} км)"
-                        if normalize_language(formdata.get("lang", "ru")) == "ru"
-                        else f"Walking time to the next point: {15 + 5 * index} minutes ({1.2 + 0.3 * index:.1f} km)"
-                    )
-                    if index < len(points) - 1
-                    else ""
-                ),
+                "segment": segment,
             }
         )
     return steps
 
 
-def demo_tips(formdata):
-    rest = max(formdata["budget"] - 700 * 2, 0)
+def demo_tips(formdata, route_plan=None):
+    used_budget = route_plan.estimated_cost_rub if route_plan else 1400
+    rest = max(formdata["budget"] - used_budget, 0)
     if normalize_language(formdata.get("lang", "ru")) == "en":
         return (
             f"You can spend the remaining budget of <span style='font-weight:bold'>{rest} ₽</span> on dessert at a cafe near the final point or on souvenirs."
@@ -353,9 +369,9 @@ def demo_tips(formdata):
     )
 
 
-def build_summary(formdata):
+def build_summary(formdata, planning_request=None, route_plan=None):
     lang = normalize_language(formdata.get("lang", "ru"))
-    steps = demo_route_steps(formdata)
+    steps = build_route_steps(formdata, planning_request, route_plan) if planning_request and route_plan else []
     ui = get_ui_text(lang)
     return {
         "vibe_verbose": get_vibe_verbose(formdata["vibe"])[lang],
@@ -369,5 +385,5 @@ def build_summary(formdata):
         "model": formdata["model"],
         "distance": None,
         "steps": steps,
-        "tips": demo_tips(formdata),
+        "tips": demo_tips(formdata, route_plan),
     }

@@ -45,7 +45,6 @@ def init_app(app):
                 formdata["end_lat"] = str(end_coords["lat"])
                 formdata["end_lng"] = str(end_coords["lng"])
 
-            result_data = build_summary(formdata)
             generated = True
             loading = False
         else:
@@ -87,17 +86,19 @@ def init_app(app):
         lang = normalize_language(formdata.get("lang", "ru"))
         formdata["lang"] = lang
 
-        if result_data is not None:
+        if generated:
             try:
-                places, description, total_distance_m = get_places(formdata)
+                places, description, planning_request, route_plan = get_places(formdata)
+                result_data = build_summary(formdata, planning_request, route_plan)
                 result_data["route_description"] = description if description != "no-description" else None
-                if total_distance_m is not None:
-                    if total_distance_m >= 1000:
-                        result_data["distance"] = f"{total_distance_m / 1000:.1f} km"
+                if route_plan.total_distance_m is not None:
+                    if route_plan.total_distance_m >= 1000:
+                        result_data["distance"] = f"{route_plan.total_distance_m / 1000:.1f} km"
                     else:
-                        result_data["distance"] = f"{total_distance_m} m"
+                        result_data["distance"] = f"{route_plan.total_distance_m} m"
             except Exception as exc:
                 places = PLACES
+                result_data = build_summary(formdata)
                 result_data["route_description"] = None
                 result_data["error"] = str(exc)
         else:
