@@ -126,6 +126,10 @@ REASON_TRANSLATIONS = {
         "ru": "избежать лишних трат",
         "en": "avoid unnecessary spending",
     },
+    "uses the best available stops even if not every strict preference could be satisfied": {
+        "ru": "использовать лучшие доступные остановки, даже если не все строгие пожелания удалось выполнить",
+        "en": "use the best available stops even if not every strict preference could be satisfied",
+    },
 }
 
 

@@ -3,7 +3,6 @@ from flask import jsonify, render_template, request, send_from_directory
 from app.geocoding import forward_geocode, reverse_geocode_coords
 from app.planner import (
     MODEL_OPTIONS,
-    PLACES,
     build_summary,
     get_paces,
     get_ui_text,
@@ -23,6 +22,7 @@ def init_app(app):
     def index():
         loading = False
         formdata = {}
+        places = []
         result_data = None
         generated = False
 
@@ -97,12 +97,9 @@ def init_app(app):
                     else:
                         result_data["distance"] = f"{route_plan.total_distance_m} m"
             except Exception as exc:
-                places = PLACES
                 result_data = build_summary(formdata)
                 result_data["route_description"] = None
                 result_data["error"] = str(exc)
-        else:
-            places = PLACES
 
         return render_template(
             "index.html",

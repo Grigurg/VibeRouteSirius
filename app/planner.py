@@ -126,18 +126,6 @@ PACE_LABELS = {
 }
 
 PACE_OPTIONS = list(PACE_LABELS.keys())
-PLACES = [
-    {
-        "name": "Шоколадница",
-        "amenity": "cafe",
-        "coordinates": [39.9262057, 43.4272589],
-    },
-    {
-        "name": "O'Sullivan's Irish Pub",
-        "amenity": "pub",
-        "coordinates": [39.9755125, 43.3964213],
-    },
-]
 MODEL_OPTIONS = [
     (model_key, model_config["label"])
     for model_key, model_config in OPENROUTER_MODELS.items()
@@ -245,7 +233,6 @@ def get_end_location_coords(req_form):
 
 
 def get_places(formdata):
-    global PLACES
     agent = get_agent()
     route_engine = get_route_engine()
     start_object = Object(float(formdata["start_lng"]), float(formdata["start_lat"]), formdata["start_addr"])
@@ -276,9 +263,9 @@ def get_places(formdata):
     route_plan = route_engine.plan(planning_request)
     description = agent.narrate_route(planning_request, route_plan, formdata["model"])
 
-    PLACES.clear()
+    places = []
     for point in route_plan.stop_points:
-        PLACES.append(
+        places.append(
             {
                 "name": point.name,
                 "amenity": point.amenity or point.primary_category,
@@ -289,7 +276,7 @@ def get_places(formdata):
                 "budget": f"~{point.estimated_cost_rub} ₽" if point.estimated_cost_rub else "",
             }
         )
-    return PLACES, description, planning_request, route_plan
+    return places, description, planning_request, route_plan
 
 
 def get_vibe_verbose(vibe):
@@ -306,6 +293,14 @@ def shorten_text(text, limit=180):
     if len(text) <= limit:
         return text
     return text[: limit - 3].rstrip() + "..."
+
+
+def format_duration_label(total_minutes, ui):
+    hours = max(int(total_minutes // 60), 0)
+    mins = max(int(total_minutes % 60), 0)
+    if mins:
+        return f"{hours} {ui['duration_hours']} {mins} {ui['duration_minutes']}"
+    return f"{hours} {ui['duration_hours']}"
 
 
 def build_route_steps(formdata, planning_request, route_plan):
@@ -373,14 +368,15 @@ def build_summary(formdata, planning_request=None, route_plan=None):
     lang = normalize_language(formdata.get("lang", "ru"))
     steps = build_route_steps(formdata, planning_request, route_plan) if planning_request and route_plan else []
     ui = get_ui_text(lang)
+    total_minutes = (
+        route_plan.estimated_duration_min
+        if route_plan is not None
+        else formdata["duration_hrs"] * 60 + formdata["duration_mins"]
+    )
     return {
         "vibe_verbose": get_vibe_verbose(formdata["vibe"])[lang],
         "pace_verbose": get_pace_verbose(formdata.get("pace", "relaxed"))[lang],
-        "duration_str": (
-            f"{formdata['duration_hrs']} {ui['duration_hours']} {formdata['duration_mins']} {ui['duration_minutes']}"
-            if formdata["duration_mins"]
-            else f"{formdata['duration_hrs']} {ui['duration_hours']}"
-        ),
+        "duration_str": format_duration_label(total_minutes, ui),
         "budget": formdata["budget"],
         "model": formdata["model"],
         "distance": None,

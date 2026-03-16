@@ -850,6 +850,9 @@ class DeterministicRoutePlanner:
         )
 
     def finalize_state(self, state, request, candidate_map):
+        return self.finalize_state_with_options(state, request, candidate_map, relax_requirements=False)
+
+    def finalize_state_with_options(self, state, request, candidate_map, relax_requirements=False):
         total_distance_m = state.walked_distance_m + state.last_point.dist_between_points(request.end)
         total_duration_min = self.route_duration_minutes(total_distance_m, state.stop_minutes, request)
         max_budget = request.hard_constraints.get("max_total_budget_rub")
@@ -860,14 +863,14 @@ class DeterministicRoutePlanner:
             return None
         if max_budget is not None and state.cost_rub > max_budget:
             return None
-        if state.seq_progress < len(request.hard_constraints.get("must_visit_in_order", [])):
+        if not relax_requirements and state.seq_progress < len(request.hard_constraints.get("must_visit_in_order", [])):
             return None
         missing_required = [
             term
             for term in request.hard_constraints.get("required_categories", [])
             if term not in state.required_satisfied
         ]
-        if missing_required:
+        if not relax_requirements and missing_required:
             return None
 
         stop_points = [self.db[point_id] for point_id in state.point_ids]
@@ -879,6 +882,8 @@ class DeterministicRoutePlanner:
             request,
             candidate_map,
         )
+        if relax_requirements:
+            route_reasons.append("uses the best available stops even if not every strict preference could be satisfied")
         stop_reasons = {
             point_id: candidate_map[point_id].reasons
             for point_id in state.point_ids
@@ -1005,6 +1010,64 @@ class DeterministicRoutePlanner:
         logger.info("Beam search produced {} completed routes", len(completed))
         return completed[:DEFAULT_COMPLETED_LIMIT]
 
+    def build_relaxed_route(self, narrowed_candidates, request: PlanningRequest):
+        candidate_map = {candidate.point.id: candidate for candidate in narrowed_candidates}
+        initial_state = RouteState(
+            point_ids=(),
+            last_point=request.start,
+            walked_distance_m=0,
+            stop_minutes=0,
+            cost_rub=0,
+            food_count=0,
+            category_counts={},
+            seq_progress=0,
+            required_satisfied=frozenset(),
+            point_score_sum=0.0,
+            transition_penalty_sum=0.0,
+            beam_score=0.0,
+            last_progress_ratio=0.0,
+            total_path_deviation_m=0.0,
+        )
+
+        beam = [initial_state]
+        best_route = self.finalize_state_with_options(
+            initial_state,
+            request,
+            candidate_map,
+            relax_requirements=True,
+        )
+
+        for _depth in range(request.hard_constraints["max_intermediate_stops"] + 1):
+            next_beam = []
+            for state in beam:
+                relaxed_route = self.finalize_state_with_options(
+                    state,
+                    request,
+                    candidate_map,
+                    relax_requirements=True,
+                )
+                if relaxed_route is not None and (
+                    best_route is None or relaxed_route.route_score > best_route.route_score
+                ):
+                    best_route = relaxed_route
+
+                if len(state.point_ids) >= request.hard_constraints["max_intermediate_stops"]:
+                    continue
+
+                for candidate in narrowed_candidates:
+                    new_state = self.extend_state(state, candidate, request, candidate_map)
+                    if new_state is None:
+                        continue
+                    next_beam.append(new_state)
+
+            if not next_beam:
+                break
+
+            next_beam.sort(key=lambda state: state.beam_score, reverse=True)
+            beam = next_beam[:DEFAULT_BEAM_WIDTH]
+
+        return best_route
+
     def build_direct_route(self, request: PlanningRequest):
         reasons = ["keeps a simple direct walk between the requested endpoints"]
         if request.hard_constraints.get("max_total_budget_rub") is not None:
@@ -1039,7 +1102,21 @@ class DeterministicRoutePlanner:
             )
             return best_route
 
-        logger.warning("No strict route found, falling back to direct route")
+        logger.warning("No strict route found, trying relaxed route fallback")
+        relaxed_route = self.build_relaxed_route(narrowed, request)
+        if relaxed_route is not None:
+            relaxed_route.debug.update(
+                {
+                    "retrieval_queries": queries,
+                    "retrieved_count": len(retrieved),
+                    "narrowed_count": len(narrowed),
+                    "completed_route_count": 0,
+                    "fallback": "relaxed_route",
+                }
+            )
+            return relaxed_route
+
+        logger.warning("No relaxed route found, falling back to direct route")
         direct_route = self.build_direct_route(request)
         direct_route.debug.update(
             {
